@@ -95,7 +95,7 @@ Make sure you have installed:
 ### 1. Clone the repository
 
 ```bash
-git clone YOUR_REPOSITORY_URL
+git clone https://github.com/uhuseynov/pulse.git
 cd pulse
 ```
 
