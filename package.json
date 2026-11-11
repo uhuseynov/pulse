@@ -1,0 +1,13 @@
+{
+  "name": "pulse",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace=@pulse/web",
+    "dev:api": "npm run start:dev --workspace=@pulse/api"
+  }
+}
