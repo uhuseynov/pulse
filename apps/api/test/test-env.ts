@@ -27,4 +27,6 @@ export function useTestEnvironment() {
   process.env.JWT_SECRET = 'test-secret-test-secret-test-secret-1234';
   process.env.JWT_EXPIRES_IN = '1h';
   process.env.WEB_ORIGIN = 'http://localhost:3000';
+  // The suites register many users from one address.
+  process.env.AUTH_RATE_LIMIT = '10000';
 }

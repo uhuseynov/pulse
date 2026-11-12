@@ -52,6 +52,8 @@ This project is being developed as a hands-on software engineering project, focu
 | Caching & Presence | Redis |
 | Audio & Video | LiveKit, WebRTC |
 | Containerization | Docker |
+| Hosting | Vercel, Render, Neon |
+| CI | GitHub Actions |
 | Version Control | Git, GitHub |
 
 ## Architecture
@@ -193,6 +195,40 @@ npm run test:e2e    # API end-to-end tests
 
 The end-to-end tests need PostgreSQL to be running. They create a separate `pulse_test` database, so development data is left alone.
 
+## Deployment
+
+Pulse runs on three free services: the web app on Vercel, the API on Render and PostgreSQL on Neon. Pushing to `main` redeploys both apps.
+
+### 1. Database (Neon)
+
+Create a project at [neon.com](https://neon.com) in a European region and copy its **direct** connection string (the one without `-pooler` in the host name).
+
+### 2. API (Render)
+
+In the [Render dashboard](https://dashboard.render.com), choose **New > Blueprint** and select this repository. Render reads `render.yaml`, which defines the build and start commands and generates `JWT_SECRET`. Enter the two values it asks for:
+
+| Variable | Value |
+|---|---|
+| `DATABASE_URL` | The Neon connection string |
+| `WEB_ORIGIN` | The URL of the web app, for example `https://pulse.vercel.app` |
+
+Migrations are applied every time the service starts.
+
+### 3. Web (Vercel)
+
+Import the repository at [vercel.com/new](https://vercel.com/new), set **Root Directory** to `apps/web`, and add one environment variable:
+
+| Variable | Value |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | The URL of the API, for example `https://pulse-api.onrender.com` |
+
+If the Vercel URL differs from the one given to Render, update `WEB_ORIGIN` there; the API only accepts requests from that origin.
+
+### Good to know
+
+- The free Render instance sleeps after 15 minutes without traffic. The next request wakes it, which takes up to a minute.
+- Sign-in and sign-up are limited to 10 attempts per minute per IP address (`AUTH_RATE_LIMIT`).
+
 ## Development Roadmap
 
 - [x] Initial monorepo structure
@@ -206,7 +242,8 @@ The end-to-end tests need PostgreSQL to be running. They create a separate `puls
 - [ ] User presence with Redis (presence is in-memory for now)
 - [ ] Voice communication with LiveKit
 - [ ] Video calls and screen sharing
-- [ ] Testing and deployment
+- [x] Automated tests and CI
+- [x] Deployment (Vercel, Render, Neon)
 
 ## Project Goals
 

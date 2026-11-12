@@ -1,10 +1,11 @@
 import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 
 const KEY_LENGTH = 64;
-// OWASP-recommended scrypt work factors (N=2^17, r=8, p=1).
-const COST = 131072;
+// One of the scrypt configurations recommended by OWASP (N=2^15, r=8, p=3).
+// It needs about 32 MB per hash, which fits small hosting instances.
+const COST = 32768;
 const BLOCK_SIZE = 8;
-const PARALLELIZATION = 1;
+const PARALLELIZATION = 3;
 
 function derive(
   password: string,

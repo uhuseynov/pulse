@@ -1,11 +1,10 @@
-import { INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { io, Socket } from 'socket.io-client';
 import request from 'supertest';
-import { App } from 'supertest/types';
 import { useTestEnvironment } from './test-env';
 
-export type TestApp = INestApplication<App>;
+export type TestApp = NestExpressApplication;
 
 export async function createTestApp(): Promise<TestApp> {
   useTestEnvironment();
@@ -16,7 +15,7 @@ export async function createTestApp(): Promise<TestApp> {
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
   }).compile();
-  const app: TestApp = moduleRef.createNestApplication();
+  const app = moduleRef.createNestApplication<TestApp>();
   configureApp(app);
   // Listen on a random free port so Socket.IO clients can connect.
   await app.listen(0);

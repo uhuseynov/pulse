@@ -1,0 +1,27 @@
+# Render Blueprint for the Pulse API.
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: pulse-api
+    runtime: node
+    plan: free
+    region: frankfurt
+    # devDependencies hold the build tools (Nest CLI, TypeScript, Prisma CLI).
+    buildCommand: npm ci --include=dev && npm run build --workspace=@pulse/api
+    # Apply pending migrations, then start the server.
+    startCommand: npm run db:deploy --workspace=@pulse/api && npm run start:prod --workspace=@pulse/api
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 24
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      # Set these two in the Render dashboard.
+      - key: DATABASE_URL
+        sync: false
+      - key: WEB_ORIGIN
+        sync: false
