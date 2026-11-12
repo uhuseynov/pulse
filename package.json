@@ -8,6 +8,12 @@
   ],
   "scripts": {
     "dev:web": "npm run dev --workspace=@pulse/web",
-    "dev:api": "npm run start:dev --workspace=@pulse/api"
+    "dev:api": "npm run start:dev --workspace=@pulse/api",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspace=@pulse/api",
+    "test:e2e": "npm run test:e2e --workspace=@pulse/api",
+    "db:migrate": "npm run db:migrate --workspace=@pulse/api",
+    "db:deploy": "npm run db:deploy --workspace=@pulse/api"
   }
 }
