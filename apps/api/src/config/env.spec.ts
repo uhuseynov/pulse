@@ -10,8 +10,25 @@ describe('validateEnv', () => {
     expect(validateEnv({ ...valid, PORT: '5000' })).toMatchObject({
       PORT: 5000,
       JWT_EXPIRES_IN: '7d',
-      WEB_ORIGIN: 'http://localhost:3000',
+      WEB_ORIGIN: ['http://localhost:3000'],
     });
+  });
+
+  it('accepts several web origins and trims trailing slashes', () => {
+    const env = validateEnv({
+      ...valid,
+      WEB_ORIGIN: 'https://pulse.example.com/, http://localhost:3000',
+    });
+    expect(env.WEB_ORIGIN).toEqual([
+      'https://pulse.example.com',
+      'http://localhost:3000',
+    ]);
+  });
+
+  it('rejects a web origin that is not a URL', () => {
+    expect(() => validateEnv({ ...valid, WEB_ORIGIN: 'pulse' })).toThrow(
+      /WEB_ORIGIN/,
+    );
   });
 
   it('names every missing or weak variable', () => {
