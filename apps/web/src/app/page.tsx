@@ -1,3 +1,4 @@
+import Link from "next/link";
 
 export default function Home() {
   return (
@@ -13,12 +14,21 @@ export default function Home() {
         </div>
 
         <div className="flex items-center gap-4">
-          <span className="text-sm text-gray-400">
+          <span className="hidden text-sm text-gray-400 sm:inline">
             Real-time communication
           </span>
-          <button className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold hover:bg-indigo-500">
+          <Link
+            href="/login"
+            className="text-sm font-medium text-gray-300 hover:text-white"
+          >
+            Sign in
+          </Link>
+          <Link
+            href="/register"
+            className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold hover:bg-indigo-500"
+          >
             Get Started
-          </button>
+          </Link>
         </div>
       </nav>
 
@@ -42,16 +52,25 @@ export default function Home() {
         </p>
 
         <div className="mt-10 flex flex-wrap justify-center gap-4">
-          <button className="rounded-xl bg-indigo-600 px-8 py-4 font-semibold transition hover:bg-indigo-500">
+          <Link
+            href="/register"
+            className="rounded-xl bg-indigo-600 px-8 py-4 font-semibold transition hover:bg-indigo-500"
+          >
             Start Connecting →
-          </button>
+          </Link>
 
-          <button className="rounded-xl border border-white/15 px-8 py-4 font-semibold hover:bg-white/5">
+          <a
+            href="#features"
+            className="rounded-xl border border-white/15 px-8 py-4 font-semibold hover:bg-white/5"
+          >
             Explore Features
-          </button>
+          </a>
         </div>
 
-        <div className="mt-24 grid w-full gap-5 text-left md:grid-cols-3">
+        <div
+          id="features"
+          className="mt-24 grid w-full scroll-mt-8 gap-5 text-left md:grid-cols-3"
+        >
           <Feature
             icon="💬"
             title="Real-time Chat"

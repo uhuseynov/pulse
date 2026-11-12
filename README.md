@@ -20,13 +20,18 @@ This project is being developed as a hands-on software engineering project, focu
 
 ## Features
 
-### Planned Features
+### Available now
 
-- [ ] User registration and authentication
-- [ ] Community and server management
-- [ ] Text channels and messaging
-- [ ] Real-time message delivery
-- [ ] Online, offline and idle presence
+- [x] User registration and authentication
+- [x] Servers with invite codes and member roles
+- [x] Text channels and message history
+- [x] Real-time message delivery
+- [x] Typing indicators and unread markers
+- [x] Online and offline presence
+
+### Planned
+
+- [ ] Idle presence
 - [ ] Friend system and direct messages
 - [ ] Voice communication
 - [ ] Video calls
@@ -107,13 +112,18 @@ npm install
 
 ### 3. Configure environment variables
 
-Create your backend environment file:
+Create the environment files:
 
 ```bash
 cp apps/api/.env.example apps/api/.env
+cp apps/web/.env.example apps/web/.env.local
 ```
 
-Configure your local environment variables as needed.
+Then set `JWT_SECRET` in `apps/api/.env` to a long random value. You can generate one with:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+```
 
 ### 4. Start infrastructure
 
@@ -123,7 +133,15 @@ docker compose up -d
 
 This starts PostgreSQL and Redis.
 
-### 5. Start the backend
+### 5. Set up the database
+
+```bash
+npm run db:deploy
+```
+
+This applies the migrations in `apps/api/prisma/migrations`. After changing `schema.prisma`, create a new migration with `npm run db:migrate`.
+
+### 6. Start the backend
 
 ```bash
 npm run dev:api
@@ -133,7 +151,7 @@ Backend: `http://localhost:4000`
 
 Health endpoint: `http://localhost:4000/health`
 
-### 6. Start the frontend
+### 7. Start the frontend
 
 Open another terminal:
 
@@ -143,17 +161,49 @@ npm run dev:web
 
 Frontend: `http://localhost:3000`
 
+## API
+
+All routes except `/health`, `/auth/register` and `/auth/login` require an `Authorization: Bearer <token>` header.
+
+| Method | Route | Description |
+|---|---|---|
+| GET | `/health` | Health check |
+| POST | `/auth/register` | Create an account |
+| POST | `/auth/login` | Sign in |
+| GET | `/auth/me` | Current user |
+| GET | `/servers` | Servers the user belongs to |
+| POST | `/servers` | Create a server |
+| POST | `/servers/join` | Join a server with an invite code |
+| GET | `/servers/:serverId` | Server with its channels and members |
+| POST | `/servers/:serverId/leave` | Leave a server |
+| DELETE | `/servers/:serverId` | Delete a server (owner) |
+| POST | `/servers/:serverId/channels` | Create a channel (owner, admin) |
+| DELETE | `/channels/:channelId` | Delete a channel (owner, admin) |
+| GET | `/channels/:channelId/messages` | Message history (`before`, `limit`) |
+| POST | `/channels/:channelId/messages` | Send a message |
+
+Socket.IO clients connect to the same origin with `auth: { token }` and receive `message:created`, `channel:created`, `channel:deleted`, `member:joined`, `member:left`, `server:deleted`, `presence:changed` and `typing`.
+
+## Testing
+
+```bash
+npm test            # API unit tests
+npm run test:e2e    # API end-to-end tests
+```
+
+The end-to-end tests need PostgreSQL to be running. They create a separate `pulse_test` database, so development data is left alone.
+
 ## Development Roadmap
 
 - [x] Initial monorepo structure
 - [x] Next.js frontend setup
 - [x] NestJS backend setup
 - [x] Initial backend health endpoint
-- [ ] PostgreSQL integration with Prisma
-- [ ] Authentication and authorization
-- [ ] Community and channel management
-- [ ] Real-time messaging with Socket.IO
-- [ ] User presence with Redis
+- [x] PostgreSQL integration with Prisma
+- [x] Authentication and authorization
+- [x] Community and channel management
+- [x] Real-time messaging with Socket.IO
+- [ ] User presence with Redis (presence is in-memory for now)
 - [ ] Voice communication with LiveKit
 - [ ] Video calls and screen sharing
 - [ ] Testing and deployment
