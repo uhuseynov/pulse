@@ -1,0 +1,95 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum ChannelType {
+  TEXT
+  VOICE
+}
+
+model User {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  email        String   @unique
+  username     String   @unique
+  displayName  String
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  ownedServers Server[]
+  memberships  Member[]
+  messages     Message[]
+
+  @@map("users")
+}
+
+model Server {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  name       String
+  inviteCode String   @unique
+  ownerId    String   @db.Uuid
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  owner    User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  members  Member[]
+  channels Channel[]
+
+  @@map("servers")
+}
+
+model Member {
+  id       String     @id @default(uuid(7)) @db.Uuid
+  role     MemberRole @default(MEMBER)
+  userId   String     @db.Uuid
+  serverId String     @db.Uuid
+  joinedAt DateTime   @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, serverId])
+  @@index([serverId])
+  @@map("members")
+}
+
+model Channel {
+  id        String      @id @default(uuid(7)) @db.Uuid
+  name      String
+  type      ChannelType @default(TEXT)
+  serverId  String      @db.Uuid
+  createdAt DateTime    @default(now())
+
+  server   Server    @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@unique([serverId, name])
+  @@map("channels")
+}
+
+model Message {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  content   String
+  channelId String    @db.Uuid
+  authorId  String    @db.Uuid
+  createdAt DateTime  @default(now())
+  editedAt  DateTime?
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author  User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([channelId, id])
+  @@map("messages")
+}
