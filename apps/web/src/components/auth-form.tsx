@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { SLOW_HINT, useSlowHint } from "@/lib/use-slow-hint";
 import { Logo } from "./logo";
 
 const inputClass =
@@ -16,6 +17,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const isRegister = mode === "register";
+  const slow = useSlowHint(pending);
 
   // Already signed in (or just finished signing in): go to the app.
   useEffect(() => {
@@ -151,6 +153,11 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
                 ? "Create account"
                 : "Sign in"}
           </button>
+          {slow && (
+            <p className="mt-3 text-center text-xs text-gray-400">
+              {SLOW_HINT}
+            </p>
+          )}
         </form>
 
         <p className="mt-6 text-center text-sm text-gray-400">

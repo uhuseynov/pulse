@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import type { User } from "@/lib/types";
 import { useChat } from "@/lib/use-chat";
+import { SLOW_HINT, useSlowHint } from "@/lib/use-slow-hint";
 import { ChannelSidebar } from "./channel-sidebar";
 import { MemberList } from "./member-list";
 import { MessagePane } from "./message-pane";
@@ -21,6 +22,18 @@ function FullScreenMessage({ children }: { children: React.ReactNode }) {
   );
 }
 
+function LoadingScreen({ label }: { label: string }) {
+  const slow = useSlowHint(true);
+  return (
+    <FullScreenMessage>
+      <span className="text-center">
+        {label}
+        {slow && <span className="mt-2 block text-xs">{SLOW_HINT}</span>}
+      </span>
+    </FullScreenMessage>
+  );
+}
+
 /** Entry point of /app: requires a signed-in user. */
 export function ChatApp() {
   const { state, logout } = useAuth();
@@ -31,7 +44,7 @@ export function ChatApp() {
   }, [state.status, router]);
 
   if (state.status !== "signed-in") {
-    return <FullScreenMessage>Loading…</FullScreenMessage>;
+    return <LoadingScreen label="Loading…" />;
   }
   return <Chat token={state.token} user={state.user} onLogout={logout} />;
 }
@@ -66,14 +79,12 @@ function Chat({
     : [];
 
   if (state.servers === null) {
-    return (
+    return state.error ? (
       <FullScreenMessage>
-        {state.error ? (
-          <span className="text-red-300">{state.error}</span>
-        ) : (
-          "Loading your servers…"
-        )}
+        <span className="text-red-300">{state.error}</span>
       </FullScreenMessage>
+    ) : (
+      <LoadingScreen label="Loading your servers…" />
     );
   }
 
