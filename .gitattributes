@@ -1,0 +1,6 @@
+# Normalise line endings: LF in the repository and in working trees, so files
+# written by tools on Windows do not show up as modified.
+* text=auto eol=lf
+
+# Written by npm; collapse it in diffs and reviews.
+package-lock.json linguist-generated=true
