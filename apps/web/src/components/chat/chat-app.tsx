@@ -1,16 +1,18 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
-import type { User } from "@/lib/types";
+import type { ChannelType, User } from "@/lib/types";
 import { useChat } from "@/lib/use-chat";
+import { useVoice } from "@/lib/use-voice";
 import { SLOW_HINT, useSlowHint } from "@/lib/use-slow-hint";
 import { ChannelSidebar } from "./channel-sidebar";
 import { MemberList } from "./member-list";
 import { MessagePane } from "./message-pane";
 import { PromptModal } from "./modal";
 import { ServerRail } from "./server-rail";
+import { VoicePane } from "./voice-pane";
 
 type Dialog = "create-server" | "join-server" | "create-channel" | null;
 
@@ -62,6 +64,15 @@ function Chat({
   const [dialog, setDialog] = useState<Dialog>(null);
   const closeDialog = () => setDialog(null);
 
+  // The gateway tracks who is in a voice channel, so tell it when that changes.
+  const { announceVoice } = actions;
+  const onVoiceChange = useCallback(
+    (channelId: string | null) => announceVoice(channelId),
+    [announceVoice],
+  );
+  const voice = useVoice(token, onVoiceChange);
+  const { audioRef } = voice;
+
   const { server } = state;
   const channel =
     server?.channels.find((c) => c.id === state.activeChannelId) ?? null;
@@ -104,17 +115,26 @@ function Chat({
         user={user}
         activeChannelId={state.activeChannelId}
         unreadChannels={state.unreadChannels}
+        voiceParticipants={state.voiceParticipants}
+        voiceEnabled={state.voiceEnabled}
+        voice={voice.state}
+        onLeaveVoice={voice.leave}
+        onToggleMute={() => void voice.toggleMute()}
         canManage={canManage}
         isOwner={myRole === "OWNER"}
         onSelectChannel={actions.selectChannel}
         onCreateChannel={() => setDialog("create-channel")}
         onDeleteChannel={(channelId, name) => {
-          if (window.confirm(`Delete #${name}? Its messages will be lost.`)) {
+          if (window.confirm(`Delete ${name}? Its messages will be lost.`)) {
+            if (voice.state.channelId === channelId) {
+              voice.leave();
+            }
             void actions.deleteChannel(channelId);
           }
         }}
         onLeave={() => {
           if (server && window.confirm(`Leave ${server.name}?`)) {
+            voice.leave();
             void actions.leaveServer(server.id);
           }
         }}
@@ -125,13 +145,30 @@ function Chat({
               `Delete ${server.name}? All of its channels and messages will be lost.`,
             )
           ) {
+            voice.leave();
             void actions.deleteServer(server.id);
           }
         }}
         onLogout={onLogout}
       />
 
-      {server && channel ? (
+      {server && channel?.type === "VOICE" ? (
+        <>
+          <VoicePane
+            key={channel.id}
+            channel={channel}
+            members={server.members}
+            participantIds={state.voiceParticipants[channel.id] ?? []}
+            voice={voice.state}
+            currentUserId={user.id}
+            onJoin={() => void voice.join(channel.id)}
+            onLeave={voice.leave}
+            onToggleMute={() => void voice.toggleMute()}
+            onUnlockAudio={() => void voice.unlockAudio()}
+          />
+          <MemberList members={server.members} />
+        </>
+      ) : server && channel ? (
         <>
           <MessagePane
             key={channel.id}
@@ -224,17 +261,37 @@ function Chat({
         />
       )}
       {dialog === "create-channel" && server && (
-        <PromptModal
+        <PromptModal<ChannelType>
           title="Create a channel"
-          description={`Add a new text channel to ${server.name}.`}
+          description={`Add a new channel to ${server.name}.`}
           label="Channel name"
           placeholder="announcements"
           submitLabel="Create"
           maxLength={32}
-          onSubmit={(name) => actions.createChannel(server.id, name)}
+          choices={
+            state.voiceEnabled
+              ? [
+                  {
+                    value: "TEXT",
+                    label: "Text",
+                    description: "Messages and history",
+                  },
+                  {
+                    value: "VOICE",
+                    label: "Voice",
+                    description: "Talk in real time",
+                  },
+                ]
+              : undefined
+          }
+          onSubmit={(name, type) =>
+            actions.createChannel(server.id, name, type || "TEXT")
+          }
           onClose={closeDialog}
         />
       )}
+      {/* Remote voice tracks are attached here. */}
+      <div ref={audioRef} className="hidden" aria-hidden />
     </main>
   );
 }

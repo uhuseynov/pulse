@@ -9,7 +9,7 @@ import {
   pickChannel,
   type ChatState,
 } from "./chat-state";
-import type { Channel, Member, Message } from "./types";
+import type { Channel, ChannelType, Member, Message } from "./types";
 
 const TYPING_VISIBLE_MS = 3500;
 const TYPING_SEND_INTERVAL_MS = 2000;
@@ -86,7 +86,10 @@ export function useChat(token: string, currentUserId: string) {
         const details = await api.getServer(token, serverId);
         const channelId = pickChannel(details, previousChannelId);
         dispatch({ type: "serverLoaded", details, channelId });
-        if (channelId) await loadMessages(channelId, options.force);
+        const opened = details.channels.find((c) => c.id === channelId);
+        if (channelId && opened?.type !== "VOICE") {
+          await loadMessages(channelId, options.force);
+        }
       } catch (error) {
         if (error instanceof ApiError && error.status === 404) {
           // We were removed, or the server was deleted, while away.
@@ -105,6 +108,12 @@ export function useChat(token: string, currentUserId: string) {
     let cancelled = false;
     void (async () => {
       try {
+        void api.voiceConfig().then(
+          (config) => {
+            if (!cancelled && config.enabled) dispatch({ type: "voiceEnabled" });
+          },
+          () => undefined,
+        );
         const servers = await api.listServers(token);
         if (cancelled) return;
         dispatch({ type: "serversLoaded", servers });
@@ -186,6 +195,12 @@ export function useChat(token: string, currentUserId: string) {
         dispatch({ type: "presenceChanged", ...event });
       },
     );
+    socket.on(
+      "voice:participants",
+      (event: { channelId: string; userIds: string[] }) => {
+        dispatch({ type: "voiceParticipants", ...event });
+      },
+    );
     socket.on("typing", (event: { channelId: string; userId: string }) => {
       dispatch({
         type: "typingStarted",
@@ -216,7 +231,12 @@ export function useChat(token: string, currentUserId: string) {
 
       selectChannel: (channelId: string) => {
         dispatch({ type: "channelSelected", channelId });
-        void loadMessages(channelId);
+        const channel = stateRef.current.server?.channels.find(
+          (c) => c.id === channelId,
+        );
+        if (channel?.type !== "VOICE") {
+          void loadMessages(channelId);
+        }
       },
 
       retryMessages: (channelId: string) => {
@@ -275,12 +295,15 @@ export function useChat(token: string, currentUserId: string) {
       createChannel: async (
         serverId: string,
         name: string,
+        type: ChannelType,
       ): Promise<string | null> => {
         try {
-          const channel = await api.createChannel(token, serverId, name);
+          const channel = await api.createChannel(token, serverId, name, type);
           dispatch({ type: "channelCreated", channel });
           dispatch({ type: "channelSelected", channelId: channel.id });
-          void loadMessages(channel.id);
+          if (channel.type === "TEXT") {
+            void loadMessages(channel.id);
+          }
           return null;
         } catch (error) {
           return describe(error);
@@ -334,6 +357,14 @@ export function useChat(token: string, currentUserId: string) {
           dispatch({ type: "olderLoaded", channelId, page: null });
           showError(error);
         }
+      },
+
+      /** Tells the server which voice channel this tab is sitting in. */
+      announceVoice: (channelId: string | null) => {
+        socketRef.current?.emit(
+          channelId ? "voice:join" : "voice:leave",
+          channelId ? { channelId } : {},
+        );
       },
 
       /** Tells other members the user is typing, at most every 2 seconds. */
