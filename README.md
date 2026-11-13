@@ -1,170 +1,217 @@
-# Pulse
+<h1 align="center">Pulse</h1>
 
 <p align="center">
-  <strong>Connect. Talk. Share.</strong>
+  <strong>Real-time chat, voice and video for communities.</strong><br />
+  Servers, channels, live messaging and voice rooms in the browser.
 </p>
 
 <p align="center">
-  A real-time communication platform for communities, messaging, voice and video.
+  <a href="https://pulse-mauve-pi.vercel.app"><strong>Live demo</strong></a>
+  &nbsp;·&nbsp;
+  <a href="#features">Features</a>
+  &nbsp;·&nbsp;
+  <a href="#architecture">Architecture</a>
+  &nbsp;·&nbsp;
+  <a href="#getting-started">Getting started</a>
 </p>
 
----
+<p align="center">
+  <a href="https://github.com/uhuseynov/pulse/actions/workflows/ci.yml">
+    <img src="https://github.com/uhuseynov/pulse/actions/workflows/ci.yml/badge.svg" alt="CI status" />
+  </a>
+</p>
+
+![Text channel with live messages, a typing indicator and an unread marker](docs/screenshots/chat.png)
+
+> The demo's API runs on a free instance that sleeps when idle. The first request after a quiet period can take up to a minute; the app tells you while it waits.
 
 ## About
 
-**Pulse** is a full-stack real-time communication platform designed to bring people together through instant messaging, online presence, voice rooms and video communication.
+Pulse is a Discord-style communication platform built as a full-stack TypeScript monorepo. People create servers, invite others with a code, talk in text channels that update live, and join voice channels with camera and screen sharing.
 
-Inspired by modern communication platforms, Pulse aims to provide a seamless experience for creating communities, collaborating and connecting in real time.
-
-This project is being developed as a hands-on software engineering project, focusing on full-stack development, real-time networking and scalable backend architecture.
+It was built to learn how the pieces of a real-time product fit together: a REST API for state, WebSockets for live events, a media server for audio and video, and a relational database underneath, all tested and deployed.
 
 ## Features
 
-### Available now
+**Messaging**
 
-- [x] User registration and authentication
-- [x] Servers with invite codes and member roles
-- [x] Text channels and message history
-- [x] Real-time message delivery
-- [x] Typing indicators and unread markers
-- [x] Online and offline presence
-- [x] Voice channels with speaking and mute indicators
-- [x] Video calls and screen sharing in voice channels
+- Servers with invite codes and role-based permissions
+- Text channels with persistent, paginated message history
+- Messages, new channels and membership changes delivered live over WebSockets
+- Typing indicators and unread markers per channel and per server
+- Online and offline presence
 
-### Planned
+**Voice and video**
 
-- [ ] Idle presence
-- [ ] Friend system and direct messages
-- [ ] User roles and permissions
+- Voice channels that show who is inside before you join
+- Speaking and muted indicators
+- Camera and screen sharing
+- The call stays connected while you browse text channels
 
-## Tech Stack
+**Accounts and safety**
 
-| Category | Technology |
+- Registration and sign-in with salted scrypt password hashes and JWT sessions
+- Every request is checked against server membership and role
+- Input validation on every route, rate limiting, and a stricter limit on sign-in
+- Security headers and an allow-list of web origins
+
+![Voice channel with three participants, one of them muted](docs/screenshots/voice.png)
+
+## Tech stack
+
+| Area | Technology |
 |---|---|
-| Frontend | Next.js, React, TypeScript |
-| Styling | Tailwind CSS |
-| Backend | NestJS, Node.js |
-| API | REST |
-| Real-time Communication | Socket.IO, WebSocket |
-| Database | PostgreSQL |
-| ORM | Prisma |
-| Caching & Presence | Redis |
-| Audio & Video | LiveKit, WebRTC |
-| Containerization | Docker |
-| Hosting | Vercel, Render, Neon |
+| Web | Next.js 16, React 19, TypeScript, Tailwind CSS 4 |
+| API | NestJS 12, TypeScript, Zod |
+| Real time | Socket.IO |
+| Voice and video | LiveKit (WebRTC) |
+| Database | PostgreSQL 17, Prisma 7 |
+| Testing | Jest, Supertest |
 | CI | GitHub Actions |
-| Version Control | Git, GitHub |
+| Hosting | Vercel (web), Render (API), Neon (PostgreSQL), LiveKit Cloud |
 
 ## Architecture
 
-Pulse follows a modular architecture with separate frontend and backend applications.
+```mermaid
+flowchart LR
+    Browser["Browser<br/>Next.js app"]
+    API["NestJS API<br/>REST + Socket.IO"]
+    DB[("PostgreSQL")]
+    LK["LiveKit<br/>media server"]
+
+    Browser -- "REST: auth, servers, channels, messages" --> API
+    Browser <-- "WebSocket: live events" --> API
+    API --> DB
+    Browser -- "1. ask for a room token" --> API
+    Browser <-- "2. audio and video over WebRTC" --> LK
+```
+
+The browser talks to three things, each for what it is good at:
+
+- **REST** changes and reads state. Sending a message is a `POST`; the API saves it and then announces it.
+- **Socket.IO** carries events from the server to everyone who should see them. Each socket is authenticated with the user's token and joined to one room per server it belongs to, so an event reaches members and nobody else.
+- **LiveKit** carries audio and video. The API never touches media. It only decides who may enter: a member asks for a token, the API checks that they belong to the channel's server, and signs a token that is valid for that one room for 15 minutes.
+
+### Design decisions
+
+- **Writes go through REST, not the socket.** A message is validated, authorised and stored by one code path, and the socket only broadcasts the result. The sender's own message is deduplicated by id when the broadcast arrives.
+- **UUIDv7 primary keys.** They sort by creation time, so the message id doubles as the pagination cursor and no separate timestamp index is needed.
+- **Non-members get 404, not 403.** A server's existence is not revealed to people outside it.
+- **Voice is optional.** Without LiveKit keys the API starts normally, reports that voice is off, and the web app hides it.
+- **Tests run against real PostgreSQL.** The end-to-end suite creates a throwaway database, applies the committed migrations and drives the HTTP and WebSocket interfaces.
+
+### Known limitations
+
+- Presence and voice occupancy are kept in memory, so the API must run as a single instance. Moving them to Redis is the next step for scaling out; the Redis service in `docker-compose.yml` is there for that work and is not used yet.
+- The session token is stored in `localStorage`. The web app and API live on different domains, where cookie-based sessions are unreliable across browsers.
+- Messages cannot be edited or deleted yet.
+
+## Project structure
 
 ```text
 pulse/
-│
 ├── apps/
-│   ├── web/              # Next.js frontend
-│   └── api/              # NestJS backend
-│
-├── packages/
-│   └── shared/           # Shared TypeScript types
-│
-├── infrastructure/
-│   └── docker/           # Infrastructure configuration
-│
-├── docs/                 # Technical documentation
-│
-├── docker-compose.yml
-├── package.json
-└── README.md
+│   ├── api/                  NestJS backend
+│   │   ├── prisma/           Schema and migrations
+│   │   ├── src/
+│   │   │   ├── auth/         Registration, sign-in, JWT guard
+│   │   │   ├── servers/      Servers, invites, membership
+│   │   │   ├── channels/     Text and voice channels
+│   │   │   ├── messages/     History and sending
+│   │   │   ├── realtime/     Socket.IO gateway and presence
+│   │   │   ├── voice/        LiveKit tokens and room occupancy
+│   │   │   ├── access/       Shared membership and role checks
+│   │   │   └── config/       Environment validation
+│   │   └── test/             End-to-end tests
+│   └── web/                  Next.js frontend
+│       └── src/
+│           ├── app/          Routes: landing, login, register, app
+│           ├── components/   Chat and voice UI
+│           └── lib/          API client, chat state, voice hook
+├── docs/screenshots/
+├── .github/workflows/ci.yml
+├── docker-compose.yml        PostgreSQL and Redis for development
+└── render.yaml               Deployment blueprint for the API
 ```
 
-### Communication Architecture
-
-- **REST API:** Handles authentication and standard application requests.
-- **Socket.IO:** Handles real-time messaging, events and user presence.
-- **PostgreSQL:** Stores persistent application data.
-- **Redis:** Supports caching, presence and distributed real-time events.
-- **LiveKit:** Handles real-time audio and video communication through WebRTC.
-
-## Getting Started
+## Getting started
 
 ### Prerequisites
 
-Make sure you have installed:
-
-- Node.js 24 LTS
-- npm
+- Node.js 24 or newer
 - Docker Desktop
 - Git
 
-### 1. Clone the repository
+### 1. Clone and install
 
 ```bash
 git clone https://github.com/uhuseynov/pulse.git
 cd pulse
-```
-
-### 2. Install dependencies
-
-```bash
 npm install
 ```
 
-### 3. Configure environment variables
-
-Create the environment files:
+### 2. Configure the environment
 
 ```bash
 cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.example apps/web/.env.local
 ```
 
-Then set `JWT_SECRET` in `apps/api/.env` to a long random value. You can generate one with:
+Set `JWT_SECRET` in `apps/api/.env` to a long random value:
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 ```
 
-### 4. Start infrastructure
+### 3. Start the database
 
 ```bash
 docker compose up -d
-```
-
-This starts PostgreSQL and Redis.
-
-### 5. Set up the database
-
-```bash
 npm run db:deploy
 ```
 
-This applies the migrations in `apps/api/prisma/migrations`. After changing `schema.prisma`, create a new migration with `npm run db:migrate`.
+### 4. Run the apps
 
-### 6. Start the backend
-
-```bash
-npm run dev:api
-```
-
-Backend: `http://localhost:4000`
-
-Health endpoint: `http://localhost:4000/health`
-
-### 7. Start the frontend
-
-Open another terminal:
+In two terminals:
 
 ```bash
-npm run dev:web
+npm run dev:api    # http://localhost:4000
+npm run dev:web    # http://localhost:3000
 ```
 
-Frontend: `http://localhost:3000`
+Open `http://localhost:3000`, create an account and a server. To see live updates, sign in as a second user in a private window and join with the invite code.
+
+### Environment variables
+
+API (`apps/api/.env`):
+
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `JWT_SECRET` | Yes | At least 32 characters |
+| `JWT_EXPIRES_IN` | No | Session lifetime, default `7d` |
+| `WEB_ORIGIN` | No | Allowed web origins, comma-separated, default `http://localhost:3000` |
+| `PORT` | No | Default `4000` |
+| `AUTH_RATE_LIMIT` | No | Sign-in and sign-up attempts per minute per IP, default `10` |
+| `LIVEKIT_URL` | No | LiveKit server URL, starts with `wss://` |
+| `LIVEKIT_API_KEY` | No | LiveKit API key |
+| `LIVEKIT_API_SECRET` | No | LiveKit API secret |
+
+The three LiveKit variables must be set together. The API refuses to start with only some of them.
+
+Web (`apps/web/.env.local`):
+
+| Variable | Description |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | URL of the API, default `http://localhost:4000` |
+
+### Voice and video locally
+
+Create a free project at [cloud.livekit.io](https://cloud.livekit.io), copy its URL, key and secret into `apps/api/.env`, and restart the API. A **Voice** option then appears when you create a channel.
 
 ## API
 
-All routes except `/health`, `/auth/register` and `/auth/login` require an `Authorization: Bearer <token>` header.
+All routes except `/health`, `/voice/config`, `/auth/register` and `/auth/login` need an `Authorization: Bearer <token>` header.
 
 | Method | Route | Description |
 |---|---|---|
@@ -174,97 +221,74 @@ All routes except `/health`, `/auth/register` and `/auth/login` require an `Auth
 | GET | `/auth/me` | Current user |
 | GET | `/servers` | Servers the user belongs to |
 | POST | `/servers` | Create a server |
-| POST | `/servers/join` | Join a server with an invite code |
-| GET | `/servers/:serverId` | Server with its channels and members |
+| POST | `/servers/join` | Join with an invite code |
+| GET | `/servers/:serverId` | Server with channels, members and voice occupancy |
 | POST | `/servers/:serverId/leave` | Leave a server |
 | DELETE | `/servers/:serverId` | Delete a server (owner) |
-| POST | `/servers/:serverId/channels` | Create a channel (owner, admin) |
+| POST | `/servers/:serverId/channels` | Create a text or voice channel (owner, admin) |
 | DELETE | `/channels/:channelId` | Delete a channel (owner, admin) |
-| GET | `/channels/:channelId/messages` | Message history (`before`, `limit`) |
+| GET | `/channels/:channelId/messages` | History, newest page first (`before`, `limit`) |
 | POST | `/channels/:channelId/messages` | Send a message |
-| GET | `/voice/config` | Whether voice rooms are available |
+| GET | `/voice/config` | Whether voice is available |
 | POST | `/channels/:channelId/voice-token` | Token for joining a voice channel |
 
-Socket.IO clients connect to the same origin with `auth: { token }` and receive `message:created`, `channel:created`, `channel:deleted`, `member:joined`, `member:left`, `server:deleted`, `presence:changed`, `voice:participants` and `typing`.
+### Real-time events
+
+Clients connect with Socket.IO to the API's origin, passing `auth: { token }`.
+
+| Event | Direction | Meaning |
+|---|---|---|
+| `message:created` | Server to client | A message was posted |
+| `channel:created`, `channel:deleted` | Server to client | The channel list changed |
+| `member:joined`, `member:left` | Server to client | Membership changed |
+| `server:deleted` | Server to client | A server was removed |
+| `presence:changed` | Server to client | A member went online or offline |
+| `voice:participants` | Server to client | Who is in a voice channel |
+| `typing` | Both | A member is typing in a channel |
+| `voice:join`, `voice:leave` | Client to server | This client entered or left a voice channel |
 
 ## Testing
 
 ```bash
-npm test            # API unit tests
-npm run test:e2e    # API end-to-end tests
+npm test            # unit tests
+npm run test:e2e    # end-to-end tests, needs PostgreSQL running
+npm run lint
 ```
 
-The end-to-end tests need PostgreSQL to be running. They create a separate `pulse_test` database, so development data is left alone.
+There are 20 unit tests and 46 end-to-end tests. The end-to-end suite covers authentication, permissions, pagination, rate limiting, live delivery over WebSockets and voice access. It uses a separate `pulse_test` database, so development data is left alone.
+
+Every push and pull request runs linting, the build and both test suites in GitHub Actions.
 
 ## Deployment
 
-Pulse runs on three free services: the web app on Vercel, the API on Render and PostgreSQL on Neon. Pushing to `main` redeploys both apps.
+Pushing to `main` redeploys the web app and the API.
 
-### 1. Database (Neon)
+| Part | Host | Notes |
+|---|---|---|
+| Web | Vercel | Root directory `apps/web`, variable `NEXT_PUBLIC_API_URL` |
+| API | Render | Defined in `render.yaml`; migrations run on every start |
+| Database | Neon | Use the **direct** connection string, without `-pooler` in the host name |
+| Media | LiveKit Cloud | Optional; add the three `LIVEKIT_*` variables on Render |
 
-Create a project at [neon.com](https://neon.com) in a European region and copy its **direct** connection string (the one without `-pooler` in the host name).
+To deploy your own copy:
 
-### 2. API (Render)
+1. Create a Neon project and copy its direct connection string.
+2. In Render choose **New > Blueprint**, select the repository, and enter `DATABASE_URL` and `WEB_ORIGIN`.
+3. Import the repository in Vercel with root directory `apps/web` and set `NEXT_PUBLIC_API_URL` to the Render URL.
+4. Set `WEB_ORIGIN` on Render to the Vercel URL. The API only accepts browsers from that origin.
 
-In the [Render dashboard](https://dashboard.render.com), choose **New > Blueprint** and select this repository. Render reads `render.yaml`, which defines the build and start commands and generates `JWT_SECRET`. Enter the two values it asks for:
+## Roadmap
 
-| Variable | Value |
-|---|---|
-| `DATABASE_URL` | The Neon connection string |
-| `WEB_ORIGIN` | The URL of the web app, for example `https://pulse.vercel.app` |
-
-Migrations are applied every time the service starts.
-
-### 3. Web (Vercel)
-
-Import the repository at [vercel.com/new](https://vercel.com/new), set **Root Directory** to `apps/web`, and add one environment variable:
-
-| Variable | Value |
-|---|---|
-| `NEXT_PUBLIC_API_URL` | The URL of the API, for example `https://pulse-api.onrender.com` |
-
-If the Vercel URL differs from the one given to Render, update `WEB_ORIGIN` there; the API only accepts requests from that origin.
-
-### Voice rooms (LiveKit)
-
-Voice is optional. Create a free project at [cloud.livekit.io](https://cloud.livekit.io), then add its `LIVEKIT_URL` (starts with `wss://`), `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` to the API's environment on Render, or to `apps/api/.env` locally. Until all three are set the app runs without voice channels.
-
-### Good to know
-
-- The free Render instance sleeps after 15 minutes without traffic. The next request wakes it, which takes up to a minute.
-- Sign-in and sign-up are limited to 10 attempts per minute per IP address (`AUTH_RATE_LIMIT`).
-
-## Development Roadmap
-
-- [x] Initial monorepo structure
-- [x] Next.js frontend setup
-- [x] NestJS backend setup
-- [x] Initial backend health endpoint
-- [x] PostgreSQL integration with Prisma
-- [x] Authentication and authorization
-- [x] Community and channel management
-- [x] Real-time messaging with Socket.IO
-- [ ] User presence with Redis (presence is in-memory for now)
-- [x] Voice communication with LiveKit
-- [x] Video calls and screen sharing
-- [x] Automated tests and CI
-- [x] Deployment (Vercel, Render, Neon)
-
-## Project Goals
-
-Through Pulse, the main engineering objectives are:
-
-- Develop full-stack engineering skills.
-- Understand real-time communication protocols.
-- Build event-driven backend systems.
-- Learn WebSocket and WebRTC architecture.
-- Implement scalable database and caching solutions.
-- Apply software engineering best practices.
+- [x] Accounts, servers, channels and message history
+- [x] Live messaging, typing indicators, presence and unread markers
+- [x] Voice channels, video and screen sharing
+- [x] Automated tests, CI and deployment
+- [ ] Direct messages and a friends list
+- [ ] Editing and deleting messages
+- [ ] Role management in the UI
+- [ ] Redis-backed presence for running more than one API instance
+- [ ] Idle status
 
 ## License
 
-This project is currently under development. License details will be added later.
-
----
-
-**Pulse — Connect. Talk. Share.**
+This project is under development. License details will be added later.
