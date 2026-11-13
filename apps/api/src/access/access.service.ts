@@ -1,9 +1,10 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { MemberRole } from '../generated/prisma/client';
+import { ChannelType, MemberRole } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Membership and permission checks shared by every feature module. */
@@ -42,5 +43,22 @@ export class AccessService {
       throw new NotFoundException('Channel not found');
     }
     return channel;
+  }
+
+  /** Same as requireChannel, but rejects text channels. */
+  async requireVoiceChannel(userId: string, channelId: string) {
+    const channel = await this.requireChannel(userId, channelId);
+    if (channel.type !== ChannelType.VOICE) {
+      throw new BadRequestException('This channel is not a voice channel');
+    }
+    return channel;
+  }
+
+  async getDisplayName(userId: string): Promise<string> {
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { displayName: true },
+    });
+    return user.displayName;
   }
 }

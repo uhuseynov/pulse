@@ -28,12 +28,12 @@ This project is being developed as a hands-on software engineering project, focu
 - [x] Real-time message delivery
 - [x] Typing indicators and unread markers
 - [x] Online and offline presence
+- [x] Voice channels with speaking and mute indicators
 
 ### Planned
 
 - [ ] Idle presence
 - [ ] Friend system and direct messages
-- [ ] Voice communication
 - [ ] Video calls
 - [ ] Screen sharing
 - [ ] User roles and permissions
@@ -183,8 +183,10 @@ All routes except `/health`, `/auth/register` and `/auth/login` require an `Auth
 | DELETE | `/channels/:channelId` | Delete a channel (owner, admin) |
 | GET | `/channels/:channelId/messages` | Message history (`before`, `limit`) |
 | POST | `/channels/:channelId/messages` | Send a message |
+| GET | `/voice/config` | Whether voice rooms are available |
+| POST | `/channels/:channelId/voice-token` | Token for joining a voice channel |
 
-Socket.IO clients connect to the same origin with `auth: { token }` and receive `message:created`, `channel:created`, `channel:deleted`, `member:joined`, `member:left`, `server:deleted`, `presence:changed` and `typing`.
+Socket.IO clients connect to the same origin with `auth: { token }` and receive `message:created`, `channel:created`, `channel:deleted`, `member:joined`, `member:left`, `server:deleted`, `presence:changed`, `voice:participants` and `typing`.
 
 ## Testing
 
@@ -224,6 +226,10 @@ Import the repository at [vercel.com/new](https://vercel.com/new), set **Root Di
 
 If the Vercel URL differs from the one given to Render, update `WEB_ORIGIN` there; the API only accepts requests from that origin.
 
+### Voice rooms (LiveKit)
+
+Voice is optional. Create a free project at [cloud.livekit.io](https://cloud.livekit.io), then add its `LIVEKIT_URL` (starts with `wss://`), `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` to the API's environment on Render, or to `apps/api/.env` locally. Until all three are set the app runs without voice channels.
+
 ### Good to know
 
 - The free Render instance sleeps after 15 minutes without traffic. The next request wakes it, which takes up to a minute.
@@ -240,7 +246,7 @@ If the Vercel URL differs from the one given to Render, update `WEB_ORIGIN` ther
 - [x] Community and channel management
 - [x] Real-time messaging with Socket.IO
 - [ ] User presence with Redis (presence is in-memory for now)
-- [ ] Voice communication with LiveKit
+- [x] Voice communication with LiveKit
 - [ ] Video calls and screen sharing
 - [x] Automated tests and CI
 - [x] Deployment (Vercel, Render, Neon)

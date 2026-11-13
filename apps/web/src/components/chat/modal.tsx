@@ -2,32 +2,44 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 
-interface PromptModalProps {
+export interface PromptChoice<T extends string> {
+  value: T;
+  label: string;
+  description: string;
+}
+
+interface PromptModalProps<T extends string = string> {
   title: string;
   description: string;
   label: string;
   placeholder: string;
   submitLabel: string;
   maxLength: number;
+  /** Optional radio group shown above the text field. */
+  choices?: PromptChoice<T>[];
   /** Returns an error message to show, or null to close the dialog. */
-  onSubmit: (value: string) => Promise<string | null>;
+  onSubmit: (value: string, choice: T) => Promise<string | null>;
   onClose: () => void;
 }
 
 /** A small dialog that asks for one line of text. */
-export function PromptModal({
+export function PromptModal<T extends string = string>({
   title,
   description,
   label,
   placeholder,
   submitLabel,
   maxLength,
+  choices,
   onSubmit,
   onClose,
-}: PromptModalProps) {
+}: PromptModalProps<T>) {
   const titleId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState("");
+  const [choice, setChoice] = useState<T>(
+    () => choices?.[0]?.value ?? ("" as T),
+  );
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -46,7 +58,7 @@ export function PromptModal({
     if (!trimmed || pending) return;
     setPending(true);
     setError(null);
-    const failure = await onSubmit(trimmed);
+    const failure = await onSubmit(trimmed, choice);
     if (failure) {
       setError(failure);
       setPending(false);
@@ -73,6 +85,36 @@ export function PromptModal({
           {title}
         </h2>
         <p className="mt-1.5 text-sm text-gray-400">{description}</p>
+
+        {choices && (
+          <fieldset className="mt-5">
+            <legend className="mb-1.5 text-sm text-gray-300">Type</legend>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {choices.map((option) => (
+                <label
+                  key={option.value}
+                  className={`cursor-pointer rounded-lg border px-3 py-2.5 text-sm ${
+                    choice === option.value
+                      ? "border-indigo-500 bg-indigo-500/10"
+                      : "border-white/10 hover:bg-white/5"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="prompt-choice"
+                    className="sr-only"
+                    checked={choice === option.value}
+                    onChange={() => setChoice(option.value)}
+                  />
+                  <span className="block font-medium">{option.label}</span>
+                  <span className="block text-xs text-gray-400">
+                    {option.description}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        )}
 
         <label className="mt-5 block text-sm">
           <span className="mb-1.5 block text-gray-300">{label}</span>

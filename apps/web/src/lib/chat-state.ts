@@ -25,6 +25,10 @@ export interface ChatState {
   unreadServers: Record<string, true>;
   /** channelId -> userId -> time (ms) at which the indicator expires. */
   typing: Record<string, Record<string, number>>;
+  /** channelId -> ids of the users sitting in that voice channel. */
+  voiceParticipants: Record<string, string[]>;
+  /** True when the API has LiveKit configured. */
+  voiceEnabled: boolean;
   connected: boolean;
   error: string | null;
 }
@@ -38,6 +42,8 @@ export const initialChatState: ChatState = {
   unreadChannels: {},
   unreadServers: {},
   typing: {},
+  voiceParticipants: {},
+  voiceEnabled: false,
   connected: false,
   error: null,
 };
@@ -66,6 +72,8 @@ export type ChatAction =
   | { type: "presenceChanged"; userId: string; online: boolean }
   | { type: "typingStarted"; channelId: string; userId: string; until: number }
   | { type: "typingExpired"; now: number }
+  | { type: "voiceEnabled" }
+  | { type: "voiceParticipants"; channelId: string; userIds: string[] }
   | { type: "connectionChanged"; connected: boolean }
   | { type: "resynced" }
   | { type: "errorShown"; message: string }
@@ -95,7 +103,8 @@ export function pickChannel(
   preferredId: string | null,
 ): string | null {
   const preferred = details.channels.find((c) => c.id === preferredId);
-  return (preferred ?? details.channels[0])?.id ?? null;
+  const firstText = details.channels.find((c) => c.type === "TEXT");
+  return (preferred ?? firstText ?? details.channels[0])?.id ?? null;
 }
 
 function removeServer(state: ChatState, serverId: string): ChatState {
@@ -142,6 +151,10 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ...state,
         servers,
         server: details,
+        voiceParticipants: {
+          ...state.voiceParticipants,
+          ...details.voiceParticipants,
+        },
         activeChannelId: action.channelId,
         unreadServers: omit(state.unreadServers, details.id),
         unreadChannels: action.channelId
@@ -295,6 +308,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ...state,
         messages: omit(state.messages, action.channelId),
         unreadChannels: omit(state.unreadChannels, action.channelId),
+        voiceParticipants: omit(state.voiceParticipants, action.channelId),
       };
       if (state.server?.id !== action.serverId) return next;
       const channels = state.server.channels.filter(
@@ -377,12 +391,31 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return { ...state, typing };
     }
 
+    case "voiceEnabled":
+      return { ...state, voiceEnabled: true };
+
+    case "voiceParticipants": {
+      if (action.userIds.length === 0) {
+        return {
+          ...state,
+          voiceParticipants: omit(state.voiceParticipants, action.channelId),
+        };
+      }
+      return {
+        ...state,
+        voiceParticipants: {
+          ...state.voiceParticipants,
+          [action.channelId]: action.userIds,
+        },
+      };
+    }
+
     case "connectionChanged":
       return { ...state, connected: action.connected };
 
     case "resynced":
       // Anything cached may be stale after a dropped connection.
-      return { ...state, messages: {}, typing: {} };
+      return { ...state, messages: {}, typing: {}, voiceParticipants: {} };
 
     case "errorShown":
       return { ...state, error: action.message };

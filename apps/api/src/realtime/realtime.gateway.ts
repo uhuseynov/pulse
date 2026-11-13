@@ -12,6 +12,8 @@ import type { Server, Socket } from 'socket.io';
 import { AuthService } from '../auth/auth.service';
 import { uuidSchema } from '../common/schemas';
 import { PrismaService } from '../prisma/prisma.service';
+import { AccessService } from '../access/access.service';
+import { VoicePresenceService } from '../voice/voice-presence.service';
 import { PresenceService } from './presence.service';
 import {
   ClientEvent,
@@ -22,7 +24,7 @@ import {
 } from './realtime.events';
 
 type AuthedSocket = Socket & {
-  data: { userId?: string; serverRooms?: string[] };
+  data: { userId?: string; serverRooms?: string[]; voiceServerId?: string };
 };
 
 @WebSocketGateway()
@@ -38,6 +40,8 @@ export class RealtimeGateway
     private readonly auth: AuthService,
     private readonly prisma: PrismaService,
     private readonly presence: PresenceService,
+    private readonly voicePresence: VoicePresenceService,
+    private readonly access: AccessService,
   ) {}
 
   async handleConnection(socket: AuthedSocket) {
@@ -79,6 +83,11 @@ export class RealtimeGateway
   }
 
   handleDisconnect(socket: AuthedSocket) {
+    const voiceChannelId = this.voicePresence.leave(socket.id);
+    if (voiceChannelId) {
+      this.broadcastVoice(voiceChannelId, socket.data.voiceServerId);
+    }
+
     const { userId, serverRooms = [] } = socket.data;
     if (!userId || !this.presence.disconnect(userId)) {
       return;
@@ -111,6 +120,51 @@ export class RealtimeGateway
     socket
       .to(serverRoom(channel.serverId))
       .emit(ServerEvent.Typing, { channelId: channel.id, userId });
+  }
+
+  @SubscribeMessage(ClientEvent.VoiceJoin)
+  async handleVoiceJoin(
+    @ConnectedSocket() socket: AuthedSocket,
+    @MessageBody() body: { channelId?: unknown },
+  ) {
+    const userId = socket.data.userId;
+    const channelId = uuidSchema.safeParse(body?.channelId);
+    if (!userId || !channelId.success) {
+      return;
+    }
+    // Throws for a channel the user cannot reach, or a text channel.
+    const channel = await this.access
+      .requireVoiceChannel(userId, channelId.data)
+      .catch(() => null);
+    if (!channel || socket.disconnected) {
+      return;
+    }
+
+    const previous = this.voicePresence.join(channel.id, socket.id, userId);
+    socket.data.voiceServerId = channel.serverId;
+    if (previous) {
+      this.broadcastVoice(previous, channel.serverId);
+    }
+    this.broadcastVoice(channel.id, channel.serverId);
+  }
+
+  @SubscribeMessage(ClientEvent.VoiceLeave)
+  handleVoiceLeave(@ConnectedSocket() socket: AuthedSocket) {
+    const channelId = this.voicePresence.leave(socket.id);
+    if (channelId) {
+      this.broadcastVoice(channelId, socket.data.voiceServerId);
+    }
+  }
+
+  private broadcastVoice(channelId: string, serverId: string | undefined) {
+    if (!serverId) {
+      return;
+    }
+    this.io.to(serverRoom(serverId)).emit(ServerEvent.VoiceParticipants, {
+      serverId,
+      channelId,
+      userIds: this.voicePresence.participants(channelId),
+    });
   }
 
   /** Sends an event to everyone currently connected to a server. */

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ChannelType } from '../generated/prisma/client';
 
 export const createChannelSchema = z.object({
   name: z
@@ -11,6 +12,7 @@ export const createChannelSchema = z.object({
     .refine((value) => /^[a-z0-9_-]+$/.test(value), {
       message: 'Channel names may only contain letters, numbers, - and _',
     }),
+  type: z.enum(ChannelType).default(ChannelType.TEXT),
 });
 
 export type CreateChannelInput = z.infer<typeof createChannelSchema>;

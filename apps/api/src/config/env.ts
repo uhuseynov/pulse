@@ -10,6 +10,11 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default('7d'),
   /** Sign-in and sign-up attempts allowed per minute for one IP address. */
   AUTH_RATE_LIMIT: z.coerce.number().int().positive().default(10),
+  // Voice rooms are optional: without these three the rest of the app still
+  // runs and the voice endpoints report that the feature is turned off.
+  LIVEKIT_URL: z.string().optional(),
+  LIVEKIT_API_KEY: z.string().optional(),
+  LIVEKIT_API_SECRET: z.string().optional(),
   /** One origin, or several separated by commas. */
   WEB_ORIGIN: z
     .string()
@@ -23,6 +28,29 @@ const envSchema = z.object({
     .pipe(z.array(z.url()).min(1)),
 });
 
+const schema = envSchema.superRefine((env, ctx) => {
+  const livekit = [
+    env.LIVEKIT_URL,
+    env.LIVEKIT_API_KEY,
+    env.LIVEKIT_API_SECRET,
+  ];
+  if (livekit.some(Boolean) && !livekit.every(Boolean)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['LIVEKIT_URL'],
+      message:
+        'LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be set together',
+    });
+  }
+  if (env.LIVEKIT_URL && !/^wss?:\/\//.test(env.LIVEKIT_URL)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['LIVEKIT_URL'],
+      message: 'LIVEKIT_URL must start with wss:// or ws://',
+    });
+  }
+});
+
 export type Env = z.infer<typeof envSchema>;
 
 /**
@@ -34,7 +62,7 @@ export function authRateLimit(): number {
 }
 
 export function validateEnv(raw: Record<string, unknown>): Env {
-  const result = envSchema.safeParse(raw);
+  const result = schema.safeParse(raw);
   if (!result.success) {
     const details = result.error.issues
       .map((issue) => `  ${issue.path.join('.')}: ${issue.message}`)

@@ -1,11 +1,13 @@
 import type {
   AuthResponse,
   Channel,
+  ChannelType,
   Message,
   MessagePage,
   ServerDetails,
   ServerSummary,
   User,
+  VoiceCredentials,
 } from "./types";
 
 export const API_URL =
@@ -103,11 +105,16 @@ export const api = {
   deleteServer: (token: string, serverId: string) =>
     request<void>(`/servers/${serverId}`, { method: "DELETE", token }),
 
-  createChannel: (token: string, serverId: string, name: string) =>
+  createChannel: (
+    token: string,
+    serverId: string,
+    name: string,
+    type: ChannelType,
+  ) =>
     request<Channel>(`/servers/${serverId}/channels`, {
       method: "POST",
       token,
-      body: { name },
+      body: { name, type },
     }),
 
   deleteChannel: (token: string, channelId: string) =>
@@ -118,6 +125,14 @@ export const api = {
       `/channels/${channelId}/messages${before ? `?before=${before}` : ""}`,
       { token },
     ),
+
+  voiceConfig: () => request<{ enabled: boolean }>("/voice/config"),
+
+  voiceToken: (token: string, channelId: string) =>
+    request<VoiceCredentials>(`/channels/${channelId}/voice-token`, {
+      method: "POST",
+      token,
+    }),
 
   sendMessage: (token: string, channelId: string, content: string) =>
     request<Message>(`/channels/${channelId}/messages`, {
