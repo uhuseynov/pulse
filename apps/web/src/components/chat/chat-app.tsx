@@ -164,6 +164,8 @@ function Chat({
             onJoin={() => void voice.join(channel.id)}
             onLeave={voice.leave}
             onToggleMute={() => void voice.toggleMute()}
+            onToggleCamera={() => void voice.toggleCamera()}
+            onToggleScreen={() => void voice.toggleScreen()}
             onUnlockAudio={() => void voice.unlockAudio()}
           />
           <MemberList members={server.members} />

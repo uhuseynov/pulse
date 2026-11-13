@@ -1,38 +1,60 @@
 "use client";
 
 import type { Channel, Member } from "@/lib/types";
-import type { VoiceState } from "@/lib/use-voice";
+import { videoKey, type VoiceState } from "@/lib/use-voice";
 import { Avatar } from "./avatar";
+import { VideoTile } from "./video-tile";
 
 function ParticipantTile({
   member,
-  speaking,
-  muted,
+  voice,
+  connectedHere,
   isSelf,
 }: {
   member: Member;
-  speaking: boolean;
-  muted: boolean;
+  voice: VoiceState;
+  connectedHere: boolean;
   isSelf: boolean;
 }) {
+  const userId = member.user.id;
+  const speaking = voice.speaking.has(userId);
+  const muted = connectedHere && voice.muted.has(userId);
+  const camera = connectedHere
+    ? voice.videoTracks.get(videoKey(userId, "camera"))
+    : undefined;
+
   return (
     <li
-      className={`flex flex-col items-center gap-3 rounded-2xl border p-6 transition ${
+      className={`relative flex aspect-video flex-col items-center justify-center gap-3 overflow-hidden rounded-2xl border transition ${
         speaking
           ? "border-emerald-500/70 bg-emerald-500/5"
           : "border-white/10 bg-white/[0.03]"
       }`}
     >
+      {camera ? (
+        <VideoTile
+          track={camera}
+          label={`${member.user.displayName}'s camera`}
+          mirrored={isSelf}
+        />
+      ) : (
+        <span
+          className={`rounded-full ring-2 transition ${
+            speaking ? "ring-emerald-500" : "ring-transparent"
+          }`}
+        >
+          <Avatar id={userId} name={member.user.displayName} />
+        </span>
+      )}
       <span
-        className={`rounded-full ring-2 transition ${
-          speaking ? "ring-emerald-500" : "ring-transparent"
+        className={`flex items-center gap-1.5 text-sm font-medium ${
+          camera
+            ? "absolute bottom-2 left-2 rounded-md bg-black/60 px-2 py-1"
+            : ""
         }`}
       >
-        <Avatar id={member.user.id} name={member.user.displayName} />
-      </span>
-      <span className="flex items-center gap-1.5 text-sm font-medium">
         {member.user.displayName}
-        {isSelf && <span className="text-xs text-gray-500">(you)</span>}
+        {isSelf && <span className="text-xs text-gray-400">(you)</span>}
         {muted && (
           <span aria-label="Microphone off" title="Microphone off">
             🔇
@@ -40,6 +62,31 @@ function ParticipantTile({
         )}
       </span>
     </li>
+  );
+}
+
+function ControlButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-xl px-5 py-3 text-sm font-semibold transition ${
+        active
+          ? "bg-indigo-600 hover:bg-indigo-500"
+          : "bg-white/[0.06] hover:bg-white/10"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -52,6 +99,8 @@ export function VoicePane({
   onJoin,
   onLeave,
   onToggleMute,
+  onToggleCamera,
+  onToggleScreen,
   onUnlockAudio,
 }: {
   channel: Channel;
@@ -62,6 +111,8 @@ export function VoicePane({
   onJoin: () => void;
   onLeave: () => void;
   onToggleMute: () => void;
+  onToggleCamera: () => void;
+  onToggleScreen: () => void;
   onUnlockAudio: () => void;
 }) {
   const here = participantIds
@@ -69,6 +120,19 @@ export function VoicePane({
     .filter((member): member is Member => member !== undefined);
   const connectedHere = voice.channelId === channel.id;
   const connecting = connectedHere && voice.status === "connecting";
+  const connected = connectedHere && voice.status === "connected";
+
+  // Screens being shared, each with the member who shares it.
+  const screens = connectedHere
+    ? here.flatMap((member) => {
+        const track = voice.videoTracks.get(videoKey(member.user.id, "screen"));
+        return track ? [{ member, track }] : [];
+      })
+    : [];
+  // Phones and some browsers cannot capture the screen.
+  const canShareScreen =
+    typeof navigator !== "undefined" &&
+    typeof navigator.mediaDevices?.getDisplayMedia === "function";
 
   return (
     <section className="flex min-w-0 flex-1 flex-col bg-[#171a22]">
@@ -76,9 +140,7 @@ export function VoicePane({
         <span className="text-lg text-gray-500">🔊</span>
         <h2 className="truncate font-semibold">{channel.name}</h2>
         <span className="ml-auto text-xs text-gray-500">
-          {here.length === 0
-            ? "Nobody here yet"
-            : `${here.length} connected`}
+          {here.length === 0 ? "Nobody here yet" : `${here.length} connected`}
         </span>
       </header>
 
@@ -91,21 +153,39 @@ export function VoicePane({
             </p>
           </div>
         ) : (
-          <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {here.map((member) => (
-              <ParticipantTile
+          <>
+            {screens.map(({ member, track }) => (
+              <figure
                 key={member.id}
-                member={member}
-                speaking={voice.speaking.has(member.user.id)}
-                muted={
-                  connectedHere
-                    ? voice.muted.has(member.user.id)
-                    : false
-                }
-                isSelf={member.user.id === currentUserId}
-              />
+                className="mb-4 overflow-hidden rounded-2xl border border-white/10 bg-black"
+              >
+                <div className="aspect-video max-h-[60vh] w-full">
+                  <VideoTile
+                    track={track}
+                    label={`${member.user.displayName}'s screen`}
+                    fit="contain"
+                  />
+                </div>
+                <figcaption className="bg-white/[0.03] px-3 py-2 text-xs text-gray-400">
+                  🖥️ {member.user.displayName}
+                  {member.user.id === currentUserId
+                    ? " (you) are sharing your screen"
+                    : " is sharing their screen"}
+                </figcaption>
+              </figure>
             ))}
-          </ul>
+            <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {here.map((member) => (
+                <ParticipantTile
+                  key={member.id}
+                  member={member}
+                  voice={voice}
+                  connectedHere={connectedHere}
+                  isSelf={member.user.id === currentUserId}
+                />
+              ))}
+            </ul>
+          </>
         )}
       </div>
 
@@ -128,21 +208,20 @@ export function VoicePane({
           </button>
         )}
 
-        <div className="flex justify-center gap-3">
-          {connectedHere && voice.status === "connected" ? (
+        <div className="flex flex-wrap justify-center gap-3">
+          {connected ? (
             <>
-              <button
-                type="button"
-                onClick={onToggleMute}
-                aria-pressed={voice.selfMuted}
-                className={`rounded-xl px-6 py-3 text-sm font-semibold transition ${
-                  voice.selfMuted
-                    ? "bg-white/10 hover:bg-white/15"
-                    : "bg-white/[0.06] hover:bg-white/10"
-                }`}
-              >
+              <ControlButton active={voice.selfMuted} onClick={onToggleMute}>
                 {voice.selfMuted ? "🔇 Unmute" : "🎙️ Mute"}
-              </button>
+              </ControlButton>
+              <ControlButton active={voice.cameraOn} onClick={onToggleCamera}>
+                {voice.cameraOn ? "📹 Stop camera" : "📹 Camera"}
+              </ControlButton>
+              {canShareScreen && (
+                <ControlButton active={voice.screenOn} onClick={onToggleScreen}>
+                  {voice.screenOn ? "🖥️ Stop sharing" : "🖥️ Share screen"}
+                </ControlButton>
+              )}
               <button
                 type="button"
                 onClick={onLeave}

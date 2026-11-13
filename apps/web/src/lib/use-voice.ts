@@ -11,6 +11,11 @@ import {
 import { api, ApiError } from "./api";
 
 export type VoiceStatus = "idle" | "connecting" | "connected";
+export type VideoSource = "camera" | "screen";
+
+/** Key of a video track in `VoiceState.videoTracks`. */
+export const videoKey = (userId: string, source: VideoSource) =>
+  `${userId}:${source}`;
 
 export interface VoiceState {
   /** The voice channel the user is connected to, or trying to connect to. */
@@ -20,7 +25,11 @@ export interface VoiceState {
   speaking: Set<string>;
   /** User ids whose microphone is off. */
   muted: Set<string>;
+  /** Live camera and screen tracks, keyed with `videoKey`. */
+  videoTracks: Map<string, Track>;
   selfMuted: boolean;
+  cameraOn: boolean;
+  screenOn: boolean;
   /** True when the browser is holding back audio until the user interacts. */
   needsAudioUnlock: boolean;
   error: string | null;
@@ -31,35 +40,39 @@ const INITIAL: VoiceState = {
   status: "idle",
   speaking: new Set(),
   muted: new Set(),
+  videoTracks: new Map(),
   selfMuted: false,
+  cameraOn: false,
+  screenOn: false,
   needsAudioUnlock: false,
   error: null,
 };
 
-function describe(error: unknown): string {
+type Device = "microphone" | "camera" | "screen";
+
+function describe(error: unknown, device: Device = "microphone"): string {
   if (error instanceof ApiError) {
     return error.message;
   }
   if (error instanceof Error) {
-    // The names the browser uses when microphone access cannot be granted.
+    // The names the browser uses when a device cannot be opened.
     if (error.name === "NotAllowedError") {
-      return "Microphone access was blocked. Allow it in your browser and try again.";
+      return device === "screen"
+        ? "Screen sharing was blocked by the browser."
+        : `Access to your ${device} was blocked. Allow it in your browser and try again.`;
     }
     if (error.name === "NotFoundError") {
-      return "No microphone was found.";
+      return `No ${device} was found.`;
     }
     if (error.name === "NotReadableError") {
-      return "Your microphone is already in use by another app.";
+      return `Your ${device} is already in use by another app.`;
     }
-  }
-  if (
-    error instanceof Error &&
-    /401|unauthori[sz]ed|invalid token/i.test(error.message)
-  ) {
-    return "The voice server rejected the connection. Its keys may be set up incorrectly.";
-  }
-  if (error instanceof Error && error.message) {
-    return `Could not join the voice channel: ${error.message}`;
+    if (/401|unauthori[sz]ed|invalid token/i.test(error.message)) {
+      return "The voice server rejected the connection. Its keys may be set up incorrectly.";
+    }
+    if (error.message) {
+      return `Could not join the voice channel: ${error.message}`;
+    }
   }
   return "Could not join the voice channel. Please try again.";
 }
@@ -131,12 +144,14 @@ export function useVoice(
           return;
         }
 
-        const room = new Room({ adaptiveStream: true });
+        const room = new Room({ adaptiveStream: true, dynacast: true });
         roomRef.current = room;
         let joined = false;
 
-        const syncParticipants = () => {
+        /** Re-reads microphones, cameras and screens from the room. */
+        const readRoom = () => {
           const muted = new Set<string>();
+          const videoTracks = new Map<string, Track>();
           for (const participant of [
             room.localParticipant,
             ...room.remoteParticipants.values(),
@@ -144,12 +159,40 @@ export function useVoice(
             if (!participant.isMicrophoneEnabled) {
               muted.add(participant.identity);
             }
+            for (const publication of participant.videoTrackPublications.values()) {
+              if (!publication.track || publication.isMuted) {
+                continue;
+              }
+              const source: VideoSource | null =
+                publication.source === Track.Source.Camera
+                  ? "camera"
+                  : publication.source === Track.Source.ScreenShare
+                    ? "screen"
+                    : null;
+              if (source) {
+                videoTracks.set(
+                  videoKey(participant.identity, source),
+                  publication.track,
+                );
+              }
+            }
           }
           setState((previous) => ({
             ...previous,
             muted,
+            videoTracks,
             selfMuted: !room.localParticipant.isMicrophoneEnabled,
+            cameraOn: room.localParticipant.isCameraEnabled,
+            screenOn: room.localParticipant.isScreenShareEnabled,
           }));
+        };
+
+        // LiveKit emits some events (a track being unsubscribed, for one)
+        // just before it updates the participant, so read on the next tick.
+        const sync = () => {
+          setTimeout(() => {
+            if (roomRef.current === room) readRoom();
+          }, 0);
         };
 
         room
@@ -157,11 +200,13 @@ export function useVoice(
             if (track.kind === Track.Kind.Audio && audioRef.current) {
               audioRef.current.appendChild(track.attach());
             }
-            syncParticipants();
+            sync();
           })
           .on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
-            track.detach().forEach((element) => element.remove());
-            syncParticipants();
+            if (track.kind === Track.Kind.Audio) {
+              track.detach().forEach((element) => element.remove());
+            }
+            sync();
           })
           .on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
             setState((previous) => ({
@@ -169,10 +214,14 @@ export function useVoice(
               speaking: new Set(speakers.map((s) => s.identity)),
             }));
           })
-          .on(RoomEvent.TrackMuted, syncParticipants)
-          .on(RoomEvent.TrackUnmuted, syncParticipants)
-          .on(RoomEvent.ParticipantConnected, syncParticipants)
-          .on(RoomEvent.ParticipantDisconnected, syncParticipants)
+          .on(RoomEvent.TrackUnpublished, sync)
+          .on(RoomEvent.TrackMuted, sync)
+          .on(RoomEvent.TrackUnmuted, sync)
+          .on(RoomEvent.LocalTrackPublished, sync)
+          // Also fires when sharing is stopped from the browser's own bar.
+          .on(RoomEvent.LocalTrackUnpublished, sync)
+          .on(RoomEvent.ParticipantConnected, sync)
+          .on(RoomEvent.ParticipantDisconnected, sync)
           .on(RoomEvent.AudioPlaybackStatusChanged, () => {
             setState((previous) => ({
               ...previous,
@@ -202,7 +251,7 @@ export function useVoice(
 
         joined = true;
         await room.localParticipant.setMicrophoneEnabled(true);
-        syncParticipants();
+        readRoom();
         setState((previous) => ({
           ...previous,
           status: "connected",
@@ -223,19 +272,54 @@ export function useVoice(
     [authToken, teardown, leave],
   );
 
-  const toggleMute = useCallback(async () => {
-    const room = roomRef.current;
-    if (!room) {
+  /** Turns one of the user's own devices on or off. */
+  const toggleDevice = useCallback(async (device: Device) => {
+    const local = roomRef.current?.localParticipant;
+    if (!local) {
       return;
     }
-    const enabled = room.localParticipant.isMicrophoneEnabled;
     try {
-      await room.localParticipant.setMicrophoneEnabled(!enabled);
-      setState((previous) => ({ ...previous, selfMuted: enabled }));
+      if (device === "microphone") {
+        await local.setMicrophoneEnabled(!local.isMicrophoneEnabled);
+      } else if (device === "camera") {
+        await local.setCameraEnabled(!local.isCameraEnabled);
+      } else {
+        await local.setScreenShareEnabled(!local.isScreenShareEnabled);
+      }
+      setState((previous) => ({
+        ...previous,
+        selfMuted: !local.isMicrophoneEnabled,
+        cameraOn: local.isCameraEnabled,
+        screenOn: local.isScreenShareEnabled,
+        error: null,
+      }));
     } catch (error) {
-      setState((previous) => ({ ...previous, error: describe(error) }));
+      // Closing the browser's screen picker is a choice, not a failure.
+      const dismissedPicker =
+        device === "screen" &&
+        error instanceof Error &&
+        (error.name === "NotAllowedError" || error.name === "AbortError");
+      if (!dismissedPicker) {
+        setState((previous) => ({
+          ...previous,
+          error: describe(error, device),
+        }));
+      }
     }
   }, []);
+
+  const toggleMute = useCallback(
+    () => toggleDevice("microphone"),
+    [toggleDevice],
+  );
+  const toggleCamera = useCallback(
+    () => toggleDevice("camera"),
+    [toggleDevice],
+  );
+  const toggleScreen = useCallback(
+    () => toggleDevice("screen"),
+    [toggleDevice],
+  );
 
   /** Starts audio after the browser blocked it until a user gesture. */
   const unlockAudio = useCallback(async () => {
@@ -250,18 +334,15 @@ export function useVoice(
     }));
   }, []);
 
-  const dismissError = useCallback(() => {
-    setState((previous) => ({ ...previous, error: null }));
-  }, []);
-
   return {
     state,
     audioRef,
     join,
     leave,
     toggleMute,
+    toggleCamera,
+    toggleScreen,
     unlockAudio,
-    dismissError,
   };
 }
 
