@@ -29,13 +29,12 @@ This project is being developed as a hands-on software engineering project, focu
 - [x] Typing indicators and unread markers
 - [x] Online and offline presence
 - [x] Voice channels with speaking and mute indicators
+- [x] Video calls and screen sharing in voice channels
 
 ### Planned
 
 - [ ] Idle presence
 - [ ] Friend system and direct messages
-- [ ] Video calls
-- [ ] Screen sharing
 - [ ] User roles and permissions
 
 ## Tech Stack
@@ -247,7 +246,7 @@ Voice is optional. Create a free project at [cloud.livekit.io](https://cloud.liv
 - [x] Real-time messaging with Socket.IO
 - [ ] User presence with Redis (presence is in-memory for now)
 - [x] Voice communication with LiveKit
-- [ ] Video calls and screen sharing
+- [x] Video calls and screen sharing
 - [x] Automated tests and CI
 - [x] Deployment (Vercel, Render, Neon)
 
