@@ -1,17 +1,11 @@
 import Link from "next/link";
+import { Logo } from "@/components/logo";
 
 export default function Home() {
   return (
     <main className="min-h-screen bg-[#0b0d12] text-white">
       <nav className="flex items-center justify-between border-b border-white/10 px-8 py-5">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-xl">
-            ≋
-          </div>
-          <span className="text-2xl font-bold tracking-tight">
-            pulse
-          </span>
-        </div>
+        <Logo />
 
         <div className="flex items-center gap-4">
           <span className="hidden text-sm text-gray-400 sm:inline">
