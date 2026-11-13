@@ -52,6 +52,15 @@ function describe(error: unknown): string {
       return "Your microphone is already in use by another app.";
     }
   }
+  if (
+    error instanceof Error &&
+    /401|unauthori[sz]ed|invalid token/i.test(error.message)
+  ) {
+    return "The voice server rejected the connection. Its keys may be set up incorrectly.";
+  }
+  if (error instanceof Error && error.message) {
+    return `Could not join the voice channel: ${error.message}`;
+  }
   return "Could not join the voice channel. Please try again.";
 }
 
@@ -124,6 +133,7 @@ export function useVoice(
 
         const room = new Room({ adaptiveStream: true });
         roomRef.current = room;
+        let joined = false;
 
         const syncParticipants = () => {
           const muted = new Set<string>();
@@ -170,11 +180,16 @@ export function useVoice(
             }));
           })
           .on(RoomEvent.ConnectionStateChanged, (connectionState) => {
-            if (connectionState === ConnectionState.Disconnected) {
-              // Dropped by the server, not by the user pressing Leave.
-              if (roomRef.current === room) {
-                leave();
-              }
+            // Only a drop after a successful join is handled here. A failed
+            // join also passes through Disconnected, and that case belongs
+            // to the catch block below so its error is shown.
+            if (
+              connectionState === ConnectionState.Disconnected &&
+              joined &&
+              roomRef.current === room
+            ) {
+              leave();
+              setState({ ...INITIAL, error: "The voice connection was lost." });
             }
           });
 
@@ -185,6 +200,7 @@ export function useVoice(
           return;
         }
 
+        joined = true;
         await room.localParticipant.setMicrophoneEnabled(true);
         syncParticipants();
         setState((previous) => ({
@@ -197,6 +213,8 @@ export function useVoice(
         if (attemptRef.current !== attempt) {
           return;
         }
+        // Kept in the console so a failed join can be diagnosed.
+        console.error("Could not join the voice channel:", error);
         teardown();
         notifyRef.current(null);
         setState({ ...INITIAL, error: describe(error) });
@@ -236,7 +254,15 @@ export function useVoice(
     setState((previous) => ({ ...previous, error: null }));
   }, []);
 
-  return { state, audioRef, join, leave, toggleMute, unlockAudio, dismissError };
+  return {
+    state,
+    audioRef,
+    join,
+    leave,
+    toggleMute,
+    unlockAudio,
+    dismissError,
+  };
 }
 
 export type VoiceControls = ReturnType<typeof useVoice>;
