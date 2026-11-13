@@ -8,10 +8,13 @@ export const ServerEvent = {
   ServerDeleted: 'server:deleted',
   Presence: 'presence:changed',
   Typing: 'typing',
+  VoiceParticipants: 'voice:participants',
 } as const;
 
 export const ClientEvent = {
   Typing: 'typing',
+  VoiceJoin: 'voice:join',
+  VoiceLeave: 'voice:leave',
 } as const;
 
 export const SERVER_ROOM_PREFIX = 'server:';

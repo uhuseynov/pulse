@@ -37,7 +37,10 @@ export async function createUser(
   prefix = 'user',
 ): Promise<TestUser> {
   userCounter += 1;
-  const username = `${prefix}_${Date.now().toString(36)}_${userCounter}`;
+  // Usernames are capped at 24 characters, so keep the prefix short and the
+  // unique part intact rather than letting the suffix be cut off.
+  const unique = `_${Date.now().toString(36)}_${userCounter}`;
+  const username = prefix.slice(0, 24 - unique.length) + unique;
   const email = `${username}@example.com`;
   const response = await request(app.getHttpServer())
     .post('/auth/register')

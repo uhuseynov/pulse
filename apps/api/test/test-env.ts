@@ -29,4 +29,8 @@ export function useTestEnvironment() {
   process.env.WEB_ORIGIN = 'http://localhost:3000';
   // The suites register many users from one address.
   process.env.AUTH_RATE_LIMIT = '10000';
+  // Tokens are signed locally, so the tests never reach LiveKit itself.
+  process.env.LIVEKIT_URL = 'wss://test.livekit.cloud';
+  process.env.LIVEKIT_API_KEY = 'APITestKey';
+  process.env.LIVEKIT_API_SECRET = 'test-secret-at-least-32-characters-long';
 }

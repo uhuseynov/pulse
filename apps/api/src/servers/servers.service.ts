@@ -8,6 +8,7 @@ import { AccessService } from '../access/access.service';
 import { MemberRole, Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PresenceService } from '../realtime/presence.service';
+import { VoicePresenceService } from '../voice/voice-presence.service';
 import { ServerEvent } from '../realtime/realtime.events';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import type { CreateServerInput } from './servers.schemas';
@@ -27,6 +28,7 @@ export class ServersService {
     private readonly access: AccessService,
     private readonly realtime: RealtimeGateway,
     private readonly presence: PresenceService,
+    private readonly voicePresence: VoicePresenceService,
   ) {}
 
   listForUser(userId: string) {
@@ -63,6 +65,10 @@ export class ServersService {
     return {
       ...server,
       members: server.members.map((member) => this.toMemberView(member)),
+      // Who is sitting in each voice channel right now.
+      voiceParticipants: this.voicePresence.snapshot(
+        server.channels.map((channel) => channel.id),
+      ),
     };
   }
 

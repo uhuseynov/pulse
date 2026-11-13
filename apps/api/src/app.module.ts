@@ -11,6 +11,7 @@ import { MessagesModule } from './messages/messages.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { ServersModule } from './servers/servers.module';
+import { VoiceModule } from './voice/voice.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { ServersModule } from './servers/servers.module';
     ServersModule,
     ChannelsModule,
     MessagesModule,
+    VoiceModule,
   ],
   controllers: [AppController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

@@ -4,7 +4,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { AccessService } from '../access/access.service';
-import { MemberRole, Prisma } from '../generated/prisma/client';
+import { ChannelType, MemberRole, Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ServerEvent } from '../realtime/realtime.events';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
@@ -24,7 +24,7 @@ export class ChannelsService {
     await this.access.requireRole(userId, serverId, MANAGER_ROLES);
     try {
       const channel = await this.prisma.channel.create({
-        data: { serverId, name: input.name },
+        data: { serverId, name: input.name, type: input.type },
       });
       this.realtime.emitToServer(serverId, ServerEvent.ChannelCreated, channel);
       return channel;
@@ -43,11 +43,16 @@ export class ChannelsService {
     const channel = await this.access.requireChannel(userId, channelId);
     await this.access.requireRole(userId, channel.serverId, MANAGER_ROLES);
 
-    const remaining = await this.prisma.channel.count({
-      where: { serverId: channel.serverId },
-    });
-    if (remaining <= 1) {
-      throw new BadRequestException('A server must keep at least one channel');
+    // A server must keep somewhere to talk, so the last text channel stays.
+    if (channel.type === ChannelType.TEXT) {
+      const remaining = await this.prisma.channel.count({
+        where: { serverId: channel.serverId, type: ChannelType.TEXT },
+      });
+      if (remaining <= 1) {
+        throw new BadRequestException(
+          'A server must keep at least one text channel',
+        );
+      }
     }
 
     await this.prisma.channel.delete({ where: { id: channel.id } });
