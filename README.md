@@ -291,4 +291,4 @@ To deploy your own copy:
 
 ## License
 
-This project is under development. License details will be added later.
+Released under the [MIT License](LICENSE).
