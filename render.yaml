@@ -35,3 +35,6 @@ services:
       # Optional: needed only to run more than one instance.
       - key: REDIS_URL
         sync: false
+      # Optional: welcome and password-reset emails (resend.com).
+      - key: RESEND_API_KEY
+        sync: false

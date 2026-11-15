@@ -86,6 +86,16 @@ export const api = {
   login: (input: { email: string; password: string }) =>
     request<AuthResponse>("/auth/login", { method: "POST", body: input }),
 
+  /** Succeeds whether or not an account has this address. */
+  forgotPassword: (email: string) =>
+    request<void>("/auth/forgot-password", { method: "POST", body: { email } }),
+
+  resetPassword: (token: string, password: string) =>
+    request<void>("/auth/reset-password", {
+      method: "POST",
+      body: { token, password },
+    }),
+
   me: (token: string) => request<User>("/auth/me", { token }),
 
   listServers: (token: string) =>

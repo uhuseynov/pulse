@@ -1,5 +1,7 @@
 export interface JwtPayload {
   sub: string;
+  /** When the token was issued, in seconds. Added by the JWT library. */
+  iat?: number;
 }
 
 export interface AuthUser {

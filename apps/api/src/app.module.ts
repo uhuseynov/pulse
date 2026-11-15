@@ -10,6 +10,7 @@ import { ChannelsModule } from './channels/channels.module';
 import { ConversationsModule } from './conversations/conversations.module';
 import { validateEnv } from './config/env';
 import { FriendsModule } from './friends/friends.module';
+import { MailModule } from './mail/mail.module';
 import { MessagesModule } from './messages/messages.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RealtimeModule } from './realtime/realtime.module';
@@ -24,6 +25,7 @@ import { VoiceModule } from './voice/voice.module';
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
     PrismaModule,
     RedisModule,
+    MailModule,
     AuthModule,
     AccessModule,
     RealtimeModule,
