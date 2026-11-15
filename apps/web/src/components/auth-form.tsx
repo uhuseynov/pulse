@@ -8,7 +8,7 @@ import { useAuth } from "@/lib/auth";
 import { SLOW_HINT, useSlowHint } from "@/lib/use-slow-hint";
 import { Logo } from "./logo";
 
-const inputClass =
+export const inputClass =
   "w-full rounded-lg border border-white/10 bg-black/30 px-4 py-2.5 text-sm text-white placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none";
 
 export function AuthForm({ mode }: { mode: "login" | "register" }) {
@@ -119,7 +119,17 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
             )}
 
             <label className="block text-sm">
-              <span className="mb-1.5 block text-gray-300">Password</span>
+              <span className="mb-1.5 flex justify-between text-gray-300">
+                Password
+                {!isRegister && (
+                  <Link
+                    href="/forgot-password"
+                    className="text-indigo-400 hover:text-indigo-300"
+                  >
+                    Forgot password?
+                  </Link>
+                )}
+              </span>
               <input
                 name="password"
                 type="password"
