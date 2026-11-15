@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { Channel, Member, ServerDetails, User } from "@/lib/types";
 import type { VoiceState } from "@/lib/use-voice";
 import { Avatar } from "./avatar";
-import { VoiceBar } from "./voice-bar";
+import { SidebarFooter } from "./sidebar-footer";
 
 interface ChannelRowProps {
   channel: Channel;
@@ -112,6 +112,7 @@ export function ChannelSidebar({
   voiceParticipants,
   voiceEnabled,
   voice,
+  voiceChannelName,
   canManage,
   isOwner,
   onSelectChannel,
@@ -130,6 +131,7 @@ export function ChannelSidebar({
   voiceParticipants: Record<string, string[]>;
   voiceEnabled: boolean;
   voice: VoiceState;
+  voiceChannelName: string | null;
   canManage: boolean;
   isOwner: boolean;
   onSelectChannel: (channelId: string) => void;
@@ -156,9 +158,6 @@ export function ChannelSidebar({
   const textChannels = server?.channels.filter((c) => c.type === "TEXT") ?? [];
   const voiceChannels = server?.channels.filter((c) => c.type === "VOICE") ?? [];
   const textCount = textChannels.length;
-  const connectedChannel = server?.channels.find(
-    (channel) => channel.id === voice.channelId,
-  );
 
   return (
     <aside className="flex w-60 shrink-0 flex-col bg-[#11141b]">
@@ -275,30 +274,14 @@ export function ChannelSidebar({
         <div className="flex-1" />
       )}
 
-      {voice.status === "connected" && connectedChannel && (
-        <VoiceBar
-          channelName={connectedChannel.name}
-          voice={voice}
-          onLeave={onLeaveVoice}
-          onToggleMute={onToggleMute}
-        />
-      )}
-
-      <footer className="flex items-center gap-2.5 border-t border-white/10 bg-black/20 px-3 py-2.5">
-        <Avatar id={user.id} name={user.displayName} size="sm" />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{user.displayName}</p>
-          <p className="truncate text-xs text-gray-500">@{user.username}</p>
-        </div>
-        <button
-          type="button"
-          onClick={onLogout}
-          title="Sign out"
-          className="rounded px-2 py-1 text-xs text-gray-400 hover:bg-white/10 hover:text-white"
-        >
-          Sign out
-        </button>
-      </footer>
+      <SidebarFooter
+        user={user}
+        voice={voice}
+        voiceChannelName={voiceChannelName}
+        onLeaveVoice={onLeaveVoice}
+        onToggleMute={onToggleMute}
+        onLogout={onLogout}
+      />
     </aside>
   );
 }

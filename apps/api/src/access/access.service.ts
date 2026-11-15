@@ -4,7 +4,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ChannelType, MemberRole } from '../generated/prisma/client';
+import {
+  ChannelType,
+  FriendshipStatus,
+  MemberRole,
+} from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Membership and permission checks shared by every feature module. */
@@ -52,6 +56,43 @@ export class AccessService {
       throw new BadRequestException('This channel is not a voice channel');
     }
     return channel;
+  }
+
+  /**
+   * Returns the conversation if the caller is one of its two participants,
+   * together with the id of the other one.
+   */
+  async requireConversation(userId: string, conversationId: string) {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: {
+        id: conversationId,
+        OR: [{ userAId: userId }, { userBId: userId }],
+      },
+    });
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+    return {
+      ...conversation,
+      otherUserId:
+        conversation.userAId === userId
+          ? conversation.userBId
+          : conversation.userAId,
+    };
+  }
+
+  async areFriends(a: string, b: string): Promise<boolean> {
+    const friendship = await this.prisma.friendship.findFirst({
+      where: {
+        status: FriendshipStatus.ACCEPTED,
+        OR: [
+          { requesterId: a, addresseeId: b },
+          { requesterId: b, addresseeId: a },
+        ],
+      },
+      select: { id: true },
+    });
+    return friendship !== null;
   }
 
   async getDisplayName(userId: string): Promise<string> {

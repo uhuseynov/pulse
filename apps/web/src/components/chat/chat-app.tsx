@@ -1,14 +1,16 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
-import type { ChannelType, User } from "@/lib/types";
+import type { ChannelType, Place, User } from "@/lib/types";
 import { useChat } from "@/lib/use-chat";
 import { useVoice } from "@/lib/use-voice";
 import { SLOW_HINT, useSlowHint } from "@/lib/use-slow-hint";
 import { ChannelSidebar } from "./channel-sidebar";
-import { MemberList } from "./member-list";
+import { FriendsPane } from "./friends-pane";
+import { HomeSidebar } from "./home-sidebar";
+import { MemberList, type MemberActions } from "./member-list";
 import { MessagePane } from "./message-pane";
 import { PromptModal } from "./modal";
 import { ServerRail } from "./server-rail";
@@ -72,6 +74,11 @@ function Chat({
   );
   const voice = useVoice(token, onVoiceChange);
   const { audioRef } = voice;
+  // Remembered so the call stays visible, and can be ended, from any view.
+  const [voiceChannel, setVoiceChannel] = useState<{
+    name: string;
+    serverId: string;
+  } | null>(null);
 
   const { server } = state;
   const channel =
@@ -79,15 +86,81 @@ function Chat({
   const myRole = server?.members.find((m) => m.user.id === user.id)?.role;
   const canManage = myRole === "OWNER" || myRole === "ADMIN";
 
-  const typingNames = channel
-    ? Object.keys(state.typing[channel.id] ?? {})
+  const conversation =
+    state.conversations?.find((c) => c.id === state.activeConversationId) ??
+    null;
+  const place: Place | null = state.home
+    ? conversation && { kind: "conversation", id: conversation.id }
+    : channel && { kind: "channel", id: channel.id };
+
+  const typingNames = place
+    ? Object.keys(state.typing[place.id] ?? {})
         .filter((userId) => userId !== user.id)
-        .map(
-          (userId) =>
-            server?.members.find((m) => m.user.id === userId)?.user
-              .displayName ?? "Someone",
+        .map((userId) =>
+          place.kind === "conversation"
+            ? (conversation?.user.displayName ?? "Someone")
+            : (server?.members.find((m) => m.user.id === userId)?.user
+                .displayName ?? "Someone"),
         )
     : [];
+
+  // People the user is friends with, or has a request pending with.
+  const { friends } = state;
+  const knownUserIds = useMemo(
+    () =>
+      new Set(
+        friends
+          ? [...friends.friends, ...friends.incoming, ...friends.outgoing].map(
+              (entry) => entry.user.id,
+            )
+          : [],
+      ),
+    [friends],
+  );
+  const homeUnread =
+    Object.keys(state.unreadConversations).length > 0 ||
+    (friends?.incoming.length ?? 0) > 0;
+
+  // Leave the call if its server is gone: deleted, or the user was removed.
+  const { servers } = state;
+  const { leave: leaveVoice, state: voiceState } = voice;
+  useEffect(() => {
+    if (
+      voiceState.status !== "idle" &&
+      voiceChannel &&
+      servers &&
+      !servers.some((s) => s.id === voiceChannel.serverId)
+    ) {
+      leaveVoice();
+    }
+  }, [voiceState.status, voiceChannel, servers, leaveVoice]);
+
+  const memberActions: MemberActions = {
+    onSetRole: (member, role) => {
+      if (server) void actions.setMemberRole(server.id, member.id, role);
+    },
+    onKick: (member) => {
+      if (
+        server &&
+        window.confirm(
+          `Remove ${member.user.displayName} from ${server.name}? They can join again with an invite code.`,
+        )
+      ) {
+        void actions.kickMember(server.id, member.id);
+      }
+    },
+    onAddFriend: (member) => {
+      void actions.sendFriendRequest(member.user.username).then((result) => {
+        if ("error" in result) actions.showMessage(result.error);
+      });
+    },
+  };
+  const sidebarVoice = {
+    voice: voice.state,
+    voiceChannelName: voiceChannel?.name ?? null,
+    onLeaveVoice: voice.leave,
+    onToggleMute: () => void voice.toggleMute(),
+  };
 
   if (state.servers === null) {
     return state.error ? (
@@ -105,54 +178,123 @@ function Chat({
         servers={state.servers}
         activeServerId={state.activeServerId}
         unreadServers={state.unreadServers}
+        homeActive={state.home}
+        homeUnread={homeUnread}
+        onHome={actions.openHome}
         onSelect={actions.selectServer}
         onCreate={() => setDialog("create-server")}
         onJoin={() => setDialog("join-server")}
       />
 
-      <ChannelSidebar
-        server={server}
-        user={user}
-        activeChannelId={state.activeChannelId}
-        unreadChannels={state.unreadChannels}
-        voiceParticipants={state.voiceParticipants}
-        voiceEnabled={state.voiceEnabled}
-        voice={voice.state}
-        onLeaveVoice={voice.leave}
-        onToggleMute={() => void voice.toggleMute()}
-        canManage={canManage}
-        isOwner={myRole === "OWNER"}
-        onSelectChannel={actions.selectChannel}
-        onCreateChannel={() => setDialog("create-channel")}
-        onDeleteChannel={(channelId, name) => {
-          if (window.confirm(`Delete ${name}? Its messages will be lost.`)) {
-            if (voice.state.channelId === channelId) {
-              voice.leave();
+      {state.home ? (
+        <HomeSidebar
+          user={user}
+          friends={friends}
+          conversations={state.conversations}
+          activeConversationId={state.activeConversationId}
+          unreadConversations={state.unreadConversations}
+          onSelect={actions.selectConversation}
+          onLogout={onLogout}
+          {...sidebarVoice}
+        />
+      ) : (
+        <ChannelSidebar
+          server={server}
+          user={user}
+          activeChannelId={state.activeChannelId}
+          unreadChannels={state.unreadChannels}
+          voiceParticipants={state.voiceParticipants}
+          voiceEnabled={state.voiceEnabled}
+          {...sidebarVoice}
+          canManage={canManage}
+          isOwner={myRole === "OWNER"}
+          onSelectChannel={actions.selectChannel}
+          onCreateChannel={() => setDialog("create-channel")}
+          onDeleteChannel={(channelId, name) => {
+            if (window.confirm(`Delete ${name}? Its messages will be lost.`)) {
+              if (voice.state.channelId === channelId) {
+                voice.leave();
+              }
+              void actions.deleteChannel(channelId);
             }
-            void actions.deleteChannel(channelId);
-          }
-        }}
-        onLeave={() => {
-          if (server && window.confirm(`Leave ${server.name}?`)) {
-            voice.leave();
-            void actions.leaveServer(server.id);
-          }
-        }}
-        onDelete={() => {
-          if (
-            server &&
-            window.confirm(
-              `Delete ${server.name}? All of its channels and messages will be lost.`,
-            )
-          ) {
-            voice.leave();
-            void actions.deleteServer(server.id);
-          }
-        }}
-        onLogout={onLogout}
-      />
+          }}
+          onLeave={() => {
+            if (server && window.confirm(`Leave ${server.name}?`)) {
+              voice.leave();
+              void actions.leaveServer(server.id);
+            }
+          }}
+          onDelete={() => {
+            if (
+              server &&
+              window.confirm(
+                `Delete ${server.name}? All of its channels and messages will be lost.`,
+              )
+            ) {
+              voice.leave();
+              void actions.deleteServer(server.id);
+            }
+          }}
+          onLogout={onLogout}
+        />
+      )}
 
-      {server && channel?.type === "VOICE" ? (
+      {state.home ? (
+        conversation ? (
+          <MessagePane
+            key={conversation.id}
+            kind="conversation"
+            name={conversation.user.displayName}
+            entry={state.messages[conversation.id]}
+            typingNames={typingNames}
+            connected={state.connected}
+            currentUserId={user.id}
+            canModerate={false}
+            readOnlyReason={
+              friends &&
+              !friends.friends.some((f) => f.user.id === conversation.user.id)
+                ? `You and ${conversation.user.displayName} are no longer friends, so you cannot send messages here.`
+                : undefined
+            }
+            onSend={(content) =>
+              actions.sendMessage(
+                { kind: "conversation", id: conversation.id },
+                content,
+              )
+            }
+            onTyping={() =>
+              actions.notifyTyping({
+                kind: "conversation",
+                id: conversation.id,
+              })
+            }
+            onLoadOlder={() =>
+              void actions.loadOlder({
+                kind: "conversation",
+                id: conversation.id,
+              })
+            }
+            onRetry={() =>
+              actions.retryMessages({
+                kind: "conversation",
+                id: conversation.id,
+              })
+            }
+            onEdit={actions.editMessage}
+            onDelete={(messageId) =>
+              void actions.deleteMessage(conversation.id, messageId)
+            }
+          />
+        ) : (
+          <FriendsPane
+            friends={friends}
+            onMessage={(userId) => void actions.startConversation(userId)}
+            onRequest={actions.sendFriendRequest}
+            onAccept={(id) => void actions.acceptFriendRequest(id)}
+            onRemove={(id) => void actions.removeFriend(id)}
+          />
+        )
+      ) : server && channel?.type === "VOICE" ? (
         <>
           <VoicePane
             key={channel.id}
@@ -161,29 +303,57 @@ function Chat({
             participantIds={state.voiceParticipants[channel.id] ?? []}
             voice={voice.state}
             currentUserId={user.id}
-            onJoin={() => void voice.join(channel.id)}
+            onJoin={() => {
+              setVoiceChannel({ name: channel.name, serverId: server.id });
+              void voice.join(channel.id);
+            }}
             onLeave={voice.leave}
             onToggleMute={() => void voice.toggleMute()}
             onToggleCamera={() => void voice.toggleCamera()}
             onToggleScreen={() => void voice.toggleScreen()}
             onUnlockAudio={() => void voice.unlockAudio()}
           />
-          <MemberList members={server.members} />
+          <MemberList
+            members={server.members}
+            currentUserId={user.id}
+            knownUserIds={knownUserIds}
+            actions={memberActions}
+          />
         </>
       ) : server && channel ? (
         <>
           <MessagePane
             key={channel.id}
-            channel={channel}
+            kind="channel"
+            name={channel.name}
             entry={state.messages[channel.id]}
             typingNames={typingNames}
             connected={state.connected}
-            onSend={(content) => actions.sendMessage(channel.id, content)}
-            onTyping={() => actions.notifyTyping(channel.id)}
-            onLoadOlder={() => void actions.loadOlder(channel.id)}
-            onRetry={() => actions.retryMessages(channel.id)}
+            currentUserId={user.id}
+            canModerate={canManage}
+            onSend={(content) =>
+              actions.sendMessage({ kind: "channel", id: channel.id }, content)
+            }
+            onTyping={() =>
+              actions.notifyTyping({ kind: "channel", id: channel.id })
+            }
+            onLoadOlder={() =>
+              void actions.loadOlder({ kind: "channel", id: channel.id })
+            }
+            onRetry={() =>
+              actions.retryMessages({ kind: "channel", id: channel.id })
+            }
+            onEdit={actions.editMessage}
+            onDelete={(messageId) =>
+              void actions.deleteMessage(channel.id, messageId)
+            }
           />
-          <MemberList members={server.members} />
+          <MemberList
+            members={server.members}
+            currentUserId={user.id}
+            knownUserIds={knownUserIds}
+            actions={memberActions}
+          />
         </>
       ) : (
         <section className="flex flex-1 flex-col items-center justify-center bg-[#171a22] px-6 text-center">

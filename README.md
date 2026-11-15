@@ -27,9 +27,9 @@
 
 ## About
 
-Pulse is a Discord-style communication platform built as a full-stack TypeScript monorepo. People create servers, invite others with a code, talk in text channels that update live, and join voice channels with camera and screen sharing.
+Pulse is a Discord-style communication platform built as a full-stack TypeScript monorepo. People create servers, invite others with a code, talk in text channels that update live, message their friends privately, and join voice channels with camera and screen sharing.
 
-It was built to learn how the pieces of a real-time product fit together: a REST API for state, WebSockets for live events, a media server for audio and video, and a relational database underneath, all tested and deployed.
+It was built to learn how the pieces of a real-time product fit together: a REST API for state, WebSockets for live events, a media server for audio and video, a relational database underneath, and Redis to keep several API instances in step, all tested and deployed.
 
 ## Features
 
@@ -38,8 +38,21 @@ It was built to learn how the pieces of a real-time product fit together: a REST
 - Servers with invite codes and role-based permissions
 - Text channels with persistent, paginated message history
 - Messages, new channels and membership changes delivered live over WebSockets
-- Typing indicators and unread markers per channel and per server
-- Online and offline presence
+- Editing and deleting messages, with moderation by the server's owner and admins
+- Typing indicators and unread markers per channel, per server and per conversation
+- Online, idle and offline presence; idle means every open tab has been inactive for five minutes
+
+**Friends and direct messages**
+
+- Friend requests by username: send, accept, decline, cancel, remove
+- Private one-to-one conversations between friends, with the same history, editing and typing indicators as channels
+- Friends see each other's presence without sharing a server
+
+**Server management**
+
+- Three roles: owner, admin and member
+- The owner promotes and demotes admins from the member list
+- The owner and admins can remove members; a removed member is disconnected from the server's events and voice channels at once
 
 **Voice and video**
 
@@ -63,9 +76,10 @@ It was built to learn how the pieces of a real-time product fit together: a REST
 |---|---|
 | Web | Next.js 16, React 19, TypeScript, Tailwind CSS 4 |
 | API | NestJS 12, TypeScript, Zod |
-| Real time | Socket.IO |
+| Real time | Socket.IO, Redis adapter |
 | Voice and video | LiveKit (WebRTC) |
 | Database | PostgreSQL 17, Prisma 7 |
+| Shared state | Redis 7 (optional) |
 | Testing | Jest, Supertest |
 | CI | GitHub Actions |
 | Hosting | Vercel (web), Render (API), Neon (PostgreSQL), LiveKit Cloud |
@@ -77,11 +91,13 @@ flowchart LR
     Browser["Browser<br/>Next.js app"]
     API["NestJS API<br/>REST + Socket.IO"]
     DB[("PostgreSQL")]
+    RD[("Redis<br/>optional")]
     LK["LiveKit<br/>media server"]
 
     Browser -- "REST: auth, servers, channels, messages" --> API
     Browser <-- "WebSocket: live events" --> API
     API --> DB
+    API <-- "presence, events between instances" --> RD
     Browser -- "1. ask for a room token" --> API
     Browser <-- "2. audio and video over WebRTC" --> LK
 ```
@@ -89,7 +105,7 @@ flowchart LR
 The browser talks to three things, each for what it is good at:
 
 - **REST** changes and reads state. Sending a message is a `POST`; the API saves it and then announces it.
-- **Socket.IO** carries events from the server to everyone who should see them. Each socket is authenticated with the user's token and joined to one room per server it belongs to, so an event reaches members and nobody else.
+- **Socket.IO** carries events from the server to everyone who should see them. Each socket is authenticated with the user's token and joined to one room per server it belongs to and one room of its own, so an event reaches members, or the two people in a conversation, and nobody else.
 - **LiveKit** carries audio and video. The API never touches media. It only decides who may enter: a member asks for a token, the API checks that they belong to the channel's server, and signs a token that is valid for that one room for 15 minutes.
 
 ### Design decisions
@@ -97,14 +113,19 @@ The browser talks to three things, each for what it is good at:
 - **Writes go through REST, not the socket.** A message is validated, authorised and stored by one code path, and the socket only broadcasts the result. The sender's own message is deduplicated by id when the broadcast arrives.
 - **UUIDv7 primary keys.** They sort by creation time, so the message id doubles as the pagination cursor and no separate timestamp index is needed.
 - **Non-members get 404, not 403.** A server's existence is not revealed to people outside it.
+- **One message table for channels and conversations.** A message belongs to a channel or to a conversation, so history, pagination, editing and deleting are one code path for both.
+- **Presence is counted per tab.** Every socket reports whether it is active or idle. A user is online while any tab is active, idle when all of them are, and offline with none, so closing one of two tabs changes nothing.
+- **Redis is optional, and atomic where it matters.** With `REDIS_URL` set, presence and voice occupancy live in Redis and Socket.IO events are relayed between instances, so the API can run as several instances behind a load balancer. The online/idle/offline transition is computed by one Lua script, so two instances can never both announce, or both miss, the same change. Entries are refreshed by a heartbeat and expire on their own if an instance dies. Without Redis the same code runs on in-memory state.
 - **Voice is optional.** Without LiveKit keys the API starts normally, reports that voice is off, and the web app hides it.
 - **Tests run against real PostgreSQL.** The end-to-end suite creates a throwaway database, applies the committed migrations and drives the HTTP and WebSocket interfaces.
 
 ### Known limitations
 
-- Presence and voice occupancy are kept in memory, so the API must run as a single instance. Moving them to Redis is the next step for scaling out; the Redis service in `docker-compose.yml` is there for that work and is not used yet.
+- Rate-limit counters are kept in memory per API instance, so with several instances the effective limit is multiplied by their number.
+- If an API instance crashes, the users connected to it are shown as online for up to a minute, until their entries expire.
 - The session token is stored in `localStorage`. The web app and API live on different domains, where cookie-based sessions are unreliable across browsers.
-- Messages cannot be edited or deleted yet.
+- Removing a member disconnects them from the server's events immediately, but a voice call they are already in is ended by their own client, not by the media server.
+- There is no password reset yet.
 
 ## Project structure
 
@@ -115,10 +136,13 @@ pulse/
 │   │   ├── prisma/           Schema and migrations
 │   │   ├── src/
 │   │   │   ├── auth/         Registration, sign-in, JWT guard
-│   │   │   ├── servers/      Servers, invites, membership
+│   │   │   ├── servers/      Servers, invites, membership, roles
 │   │   │   ├── channels/     Text and voice channels
-│   │   │   ├── messages/     History and sending
+│   │   │   ├── messages/     History, sending, editing and deleting
+│   │   │   ├── friends/      Friend requests and friendships
+│   │   │   ├── conversations/ Direct-message threads
 │   │   │   ├── realtime/     Socket.IO gateway and presence
+│   │   │   ├── redis/        Optional shared connection
 │   │   │   ├── voice/        LiveKit tokens and room occupancy
 │   │   │   ├── access/       Shared membership and role checks
 │   │   │   └── config/       Environment validation
@@ -193,6 +217,7 @@ API (`apps/api/.env`):
 | `WEB_ORIGIN` | No | Allowed web origins, comma-separated, default `http://localhost:3000` |
 | `PORT` | No | Default `4000` |
 | `AUTH_RATE_LIMIT` | No | Sign-in and sign-up attempts per minute per IP, default `10` |
+| `REDIS_URL` | No | Redis connection string, e.g. `redis://localhost:6379`. Needed only to run more than one API instance |
 | `LIVEKIT_URL` | No | LiveKit server URL, starts with `wss://` |
 | `LIVEKIT_API_KEY` | No | LiveKit API key |
 | `LIVEKIT_API_SECRET` | No | LiveKit API secret |
@@ -204,6 +229,17 @@ Web (`apps/web/.env.local`):
 | Variable | Description |
 |---|---|
 | `NEXT_PUBLIC_API_URL` | URL of the API, default `http://localhost:4000` |
+
+### Running more than one API instance
+
+`docker compose up -d` already starts Redis. Add `REDIS_URL=redis://localhost:6379` to `apps/api/.env` and start a second instance on another port:
+
+```bash
+npm run dev:api
+PORT=4001 npm run start --workspace=@pulse/api
+```
+
+A client connected to one instance now receives messages and presence changes that happen on the other.
 
 ### Voice and video locally
 
@@ -225,10 +261,22 @@ All routes except `/health`, `/voice/config`, `/auth/register` and `/auth/login`
 | GET | `/servers/:serverId` | Server with channels, members and voice occupancy |
 | POST | `/servers/:serverId/leave` | Leave a server |
 | DELETE | `/servers/:serverId` | Delete a server (owner) |
+| PATCH | `/servers/:serverId/members/:memberId` | Make a member an admin, or an admin a member (owner) |
+| DELETE | `/servers/:serverId/members/:memberId` | Remove a member (owner; admins can remove members) |
 | POST | `/servers/:serverId/channels` | Create a text or voice channel (owner, admin) |
 | DELETE | `/channels/:channelId` | Delete a channel (owner, admin) |
 | GET | `/channels/:channelId/messages` | History, newest page first (`before`, `limit`) |
 | POST | `/channels/:channelId/messages` | Send a message |
+| PATCH | `/messages/:messageId` | Edit a message (author) |
+| DELETE | `/messages/:messageId` | Delete a message (author; owner and admins in a server) |
+| GET | `/friends` | Friends, and incoming and outgoing requests |
+| POST | `/friends/requests` | Send a friend request by `username` |
+| POST | `/friends/requests/:friendshipId/accept` | Accept a request |
+| DELETE | `/friends/:friendshipId` | Remove a friend, decline or cancel a request |
+| GET | `/conversations` | Direct-message threads, most recent first |
+| POST | `/conversations` | Open the thread with a friend (`userId`) |
+| GET | `/conversations/:conversationId/messages` | History of a thread (`before`, `limit`) |
+| POST | `/conversations/:conversationId/messages` | Send a direct message |
 | GET | `/voice/config` | Whether voice is available |
 | POST | `/channels/:channelId/voice-token` | Token for joining a voice channel |
 
@@ -238,24 +286,27 @@ Clients connect with Socket.IO to the API's origin, passing `auth: { token }`.
 
 | Event | Direction | Meaning |
 |---|---|---|
-| `message:created` | Server to client | A message was posted |
+| `message:created`, `message:updated`, `message:deleted` | Server to client | A message was posted, edited or deleted, in a channel or a conversation |
 | `channel:created`, `channel:deleted` | Server to client | The channel list changed |
-| `member:joined`, `member:left` | Server to client | Membership changed |
+| `member:joined`, `member:updated`, `member:left` | Server to client | Membership or a role changed |
 | `server:deleted` | Server to client | A server was removed |
-| `presence:changed` | Server to client | A member went online or offline |
+| `server:kicked` | Server to client | This user was removed from a server |
+| `friends:changed` | Server to client | This user's friends or requests changed; reload them |
+| `presence:changed` | Server to client | A member or friend is now `online`, `idle` or `offline` |
 | `voice:participants` | Server to client | Who is in a voice channel |
-| `typing` | Both | A member is typing in a channel |
+| `typing` | Both | Someone is typing in a channel or a conversation |
+| `presence:activity` | Client to server | This tab became idle, or active again |
 | `voice:join`, `voice:leave` | Client to server | This client entered or left a voice channel |
 
 ## Testing
 
 ```bash
 npm test            # unit tests
-npm run test:e2e    # end-to-end tests, needs PostgreSQL running
+npm run test:e2e    # end-to-end tests, needs PostgreSQL and Redis running
 npm run lint
 ```
 
-There are 20 unit tests and 46 end-to-end tests. The end-to-end suite covers authentication, permissions, pagination, rate limiting, live delivery over WebSockets and voice access. It uses a separate `pulse_test` database, so development data is left alone.
+There are 24 unit tests and 78 end-to-end tests. The end-to-end suite covers authentication, permissions, pagination, rate limiting, live delivery over WebSockets, message editing, roles, friends, direct messages and voice access. One suite starts two API instances that share a database and Redis, and checks that messages, presence and voice occupancy cross from one to the other. The tests use a separate `pulse_test` database, so development data is left alone.
 
 Every push and pull request runs linting, the build and both test suites in GitHub Actions.
 
@@ -269,6 +320,7 @@ Pushing to `main` redeploys the web app and the API.
 | API | Render | Defined in `render.yaml`; migrations run on every start |
 | Database | Neon | Use the **direct** connection string, without `-pooler` in the host name |
 | Media | LiveKit Cloud | Optional; add the three `LIVEKIT_*` variables on Render |
+| Redis | Any managed Redis | Optional; set `REDIS_URL` on Render before scaling the API past one instance |
 
 To deploy your own copy:
 
@@ -283,11 +335,13 @@ To deploy your own copy:
 - [x] Live messaging, typing indicators, presence and unread markers
 - [x] Voice channels, video and screen sharing
 - [x] Automated tests, CI and deployment
-- [ ] Direct messages and a friends list
-- [ ] Editing and deleting messages
-- [ ] Role management in the UI
-- [ ] Redis-backed presence for running more than one API instance
-- [ ] Idle status
+- [x] Direct messages and a friends list
+- [x] Editing and deleting messages
+- [x] Role management in the UI
+- [x] Redis-backed presence for running more than one API instance
+- [x] Idle status
+- [ ] Password reset by email
+- [ ] Welcome email on sign-up
 
 ## License
 

@@ -2,7 +2,7 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import type { ChannelMessages } from "@/lib/chat-state";
-import type { Channel, Message } from "@/lib/types";
+import type { Message } from "@/lib/types";
 import { Avatar } from "./avatar";
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
@@ -30,7 +30,102 @@ function typingText(names: string[]): string | null {
   return "Several people are typing…";
 }
 
-function MessageList({ items }: { items: Message[] }) {
+/** The text box that replaces a message while it is being edited. */
+function EditBox({
+  initial,
+  onSave,
+  onCancel,
+}: {
+  initial: string;
+  onSave: (content: string) => Promise<boolean>;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    const content = value.trim();
+    if (saving) return;
+    if (!content || content === initial) {
+      onCancel();
+      return;
+    }
+    setSaving(true);
+    // On failure the box stays open so the text is not lost.
+    if (!(await onSave(content))) setSaving(false);
+  }
+
+  return (
+    <div className="py-1">
+      <textarea
+        autoFocus
+        value={value}
+        rows={1}
+        maxLength={4000}
+        aria-label="Edit message"
+        onChange={(event) => setValue(event.target.value)}
+        onFocus={(event) => {
+          const end = event.target.value.length;
+          event.target.setSelectionRange(end, end);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onCancel();
+          } else if (
+            event.key === "Enter" &&
+            !event.shiftKey &&
+            !event.nativeEvent.isComposing
+          ) {
+            event.preventDefault();
+            void save();
+          }
+        }}
+        className="max-h-40 min-h-6 w-full resize-none rounded-lg bg-white/[0.06] px-3 py-2 text-[15px] focus:outline-none [field-sizing:content]"
+      />
+      <p className="mt-1 text-xs text-gray-500">
+        Escape to{" "}
+        <button
+          type="button"
+          onClick={onCancel}
+          className="text-indigo-400 hover:underline"
+        >
+          cancel
+        </button>{" "}
+        · Enter to{" "}
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={saving}
+          className="text-indigo-400 hover:underline"
+        >
+          save
+        </button>
+      </p>
+    </div>
+  );
+}
+
+function MessageList({
+  items,
+  currentUserId,
+  canModerate,
+  editingId,
+  onStartEdit,
+  onStopEdit,
+  onEdit,
+  onDelete,
+}: {
+  items: Message[];
+  currentUserId: string;
+  /** May delete other people's messages. */
+  canModerate: boolean;
+  editingId: string | null;
+  onStartEdit: (messageId: string) => void;
+  onStopEdit: () => void;
+  onEdit: (messageId: string, content: string) => Promise<boolean>;
+  onDelete: (messageId: string) => void;
+}) {
   return items.map((message, index) => {
     const previous = items[index - 1];
     const created = new Date(message.createdAt);
@@ -40,6 +135,8 @@ function MessageList({ items }: { items: Message[] }) {
       !newDay &&
       previous.author.id === message.author.id &&
       created.getTime() - previousCreated.getTime() < GROUP_WINDOW_MS;
+    const mine = message.author.id === currentUserId;
+    const editing = editingId === message.id;
 
     return (
       <div key={message.id}>
@@ -51,7 +148,7 @@ function MessageList({ items }: { items: Message[] }) {
           </div>
         )}
         <div
-          className={`group flex gap-3 px-4 py-0.5 hover:bg-white/[0.02] ${
+          className={`group relative flex gap-3 px-4 py-0.5 hover:bg-white/[0.02] ${
             grouped ? "" : "mt-3"
           }`}
         >
@@ -81,36 +178,97 @@ function MessageList({ items }: { items: Message[] }) {
                 </time>
               </p>
             )}
-            <p className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-gray-200">
-              {message.content}
-            </p>
+            {editing ? (
+              <EditBox
+                initial={message.content}
+                onCancel={onStopEdit}
+                onSave={async (content) => {
+                  const saved = await onEdit(message.id, content);
+                  if (saved) onStopEdit();
+                  return saved;
+                }}
+              />
+            ) : (
+              <p className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-gray-200">
+                {message.content}
+                {message.editedAt && (
+                  <span
+                    title={`Edited ${dayFormat.format(new Date(message.editedAt))}, ${timeFormat.format(new Date(message.editedAt))}`}
+                    className="ml-1.5 select-none text-[11px] text-gray-500"
+                  >
+                    (edited)
+                  </span>
+                )}
+              </p>
+            )}
           </div>
+          {!editing && (mine || canModerate) && (
+            <div className="absolute -top-3 right-4 hidden overflow-hidden rounded-md border border-white/10 bg-[#11141b] text-xs shadow-lg group-focus-within:flex group-hover:flex">
+              {mine && (
+                <button
+                  type="button"
+                  onClick={() => onStartEdit(message.id)}
+                  className="px-2.5 py-1 text-gray-300 hover:bg-white/10 hover:text-white"
+                >
+                  Edit
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm("Delete this message?")) {
+                    onDelete(message.id);
+                  }
+                }}
+                className="px-2.5 py-1 text-gray-300 hover:bg-red-500/15 hover:text-red-300"
+              >
+                Delete
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
   });
 }
 
+/** A list of messages with a composer: a text channel or a conversation. */
 export function MessagePane({
-  channel,
+  kind,
+  name,
   entry,
   typingNames,
   connected,
+  currentUserId,
+  canModerate,
+  readOnlyReason,
   onSend,
   onTyping,
   onLoadOlder,
   onRetry,
+  onEdit,
+  onDelete,
 }: {
-  channel: Channel;
+  kind: "channel" | "conversation";
+  /** The channel's name, or the other person's display name. */
+  name: string;
   entry: ChannelMessages | undefined;
   typingNames: string[];
   connected: boolean;
+  currentUserId: string;
+  canModerate: boolean;
+  /** When set, the composer is replaced by this explanation. */
+  readOnlyReason?: string;
   onSend: (content: string) => Promise<boolean>;
   onTyping: () => void;
   onLoadOlder: () => void;
   onRetry: () => void;
+  onEdit: (messageId: string, content: string) => Promise<boolean>;
+  onDelete: (messageId: string) => void;
 }) {
+  const symbol = kind === "channel" ? "#" : "@";
   const [draft, setDraft] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
@@ -168,8 +326,8 @@ export function MessagePane({
   return (
     <section className="flex min-w-0 flex-1 flex-col bg-[#171a22]">
       <header className="flex items-center gap-2 border-b border-white/10 px-4 py-3">
-        <span className="text-xl text-gray-500">#</span>
-        <h2 className="truncate font-semibold">{channel.name}</h2>
+        <span className="text-xl text-gray-500">{symbol}</span>
+        <h2 className="truncate font-semibold">{name}</h2>
         {!connected && (
           <span className="ml-auto rounded-full bg-amber-500/15 px-2.5 py-1 text-xs text-amber-300">
             Reconnecting…
@@ -212,13 +370,26 @@ export function MessagePane({
               </div>
             ) : (
               <div className="px-4 pb-2 pt-8">
-                <p className="text-2xl font-bold">Welcome to #{channel.name}</p>
+                <p className="text-2xl font-bold">
+                  {kind === "channel" ? `Welcome to #${name}` : name}
+                </p>
                 <p className="mt-1 text-sm text-gray-400">
-                  This is the start of the channel.
+                  {kind === "channel"
+                    ? "This is the start of the channel."
+                    : `This is the start of your conversation with ${name}.`}
                 </p>
               </div>
             )}
-            <MessageList items={entry.items} />
+            <MessageList
+              items={entry.items}
+              currentUserId={currentUserId}
+              canModerate={canModerate}
+              editingId={editingId}
+              onStartEdit={setEditingId}
+              onStopEdit={() => setEditingId(null)}
+              onEdit={onEdit}
+              onDelete={onDelete}
+            />
           </>
         )}
       </div>
@@ -227,38 +398,44 @@ export function MessagePane({
         <p className="h-5 text-xs text-gray-400" aria-live="polite">
           {typing}
         </p>
-        <div className="flex items-end gap-2 rounded-xl bg-white/[0.06] px-4 py-2.5">
-          <textarea
-            value={draft}
-            rows={1}
-            maxLength={4000}
-            placeholder={`Message #${channel.name}`}
-            aria-label={`Message #${channel.name}`}
-            onChange={(event) => {
-              setDraft(event.target.value);
-              if (event.target.value.trim()) onTyping();
-            }}
-            onKeyDown={(event) => {
-              if (
-                event.key === "Enter" &&
-                !event.shiftKey &&
-                !event.nativeEvent.isComposing
-              ) {
-                event.preventDefault();
-                void send();
-              }
-            }}
-            className="max-h-40 min-h-6 flex-1 resize-none bg-transparent text-[15px] placeholder:text-gray-500 focus:outline-none [field-sizing:content]"
-          />
-          <button
-            type="button"
-            onClick={() => void send()}
-            disabled={sending || !draft.trim()}
-            className="rounded-lg bg-indigo-600 px-3.5 py-1.5 text-sm font-semibold hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Send
-          </button>
-        </div>
+        {readOnlyReason ? (
+          <p className="rounded-xl bg-white/[0.04] px-4 py-3 text-sm text-gray-400">
+            {readOnlyReason}
+          </p>
+        ) : (
+          <div className="flex items-end gap-2 rounded-xl bg-white/[0.06] px-4 py-2.5">
+            <textarea
+              value={draft}
+              rows={1}
+              maxLength={4000}
+              placeholder={`Message ${symbol}${name}`}
+              aria-label={`Message ${symbol}${name}`}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                if (event.target.value.trim()) onTyping();
+              }}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Enter" &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  event.preventDefault();
+                  void send();
+                }
+              }}
+              className="max-h-40 min-h-6 flex-1 resize-none bg-transparent text-[15px] placeholder:text-gray-500 focus:outline-none [field-sizing:content]"
+            />
+            <button
+              type="button"
+              onClick={() => void send()}
+              disabled={sending || !draft.trim()}
+              className="rounded-lg bg-indigo-600 px-3.5 py-1.5 text-sm font-semibold hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Send
+            </button>
+          </div>
+        )}
       </footer>
     </section>
   );

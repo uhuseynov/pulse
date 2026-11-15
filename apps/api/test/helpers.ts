@@ -6,8 +6,10 @@ import { useTestEnvironment } from './test-env';
 
 export type TestApp = NestExpressApplication;
 
-export async function createTestApp(): Promise<TestApp> {
-  useTestEnvironment();
+export async function createTestApp(
+  options: { redis?: boolean } = {},
+): Promise<TestApp> {
+  useTestEnvironment(options);
   // Imported lazily so the environment is set before any module reads it.
   const { AppModule } = await import('../src/app.module.js');
   const { configureApp } = await import('../src/app.setup.js');
@@ -61,9 +63,26 @@ export function as(app: TestApp, user: TestUser) {
   return {
     get: (url: string) => request(server).get(url).set(auth),
     post: (url: string) => request(server).post(url).set(auth),
+    patch: (url: string) => request(server).patch(url).set(auth),
     delete: (url: string) => request(server).delete(url).set(auth),
   };
 }
+
+/** Makes two users friends: one asks, the other asks back. */
+export async function befriend(app: TestApp, a: TestUser, b: TestUser) {
+  await as(app, a)
+    .post('/friends/requests')
+    .send({ username: b.username })
+    .expect(201);
+  await as(app, b)
+    .post('/friends/requests')
+    .send({ username: a.username })
+    .expect(201);
+}
+
+/** Lets the gateway finish putting sockets in their rooms. */
+export const settle = (ms = 200) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function connectSocket(
   app: TestApp,

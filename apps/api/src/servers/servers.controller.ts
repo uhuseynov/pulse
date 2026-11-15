@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   Param,
+  Patch,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -15,8 +16,10 @@ import { uuidSchema } from '../common/schemas';
 import {
   createServerSchema,
   joinServerSchema,
+  updateMemberSchema,
   type CreateServerInput,
   type JoinServerInput,
+  type UpdateMemberInput,
 } from './servers.schemas';
 import { ServersService } from './servers.service';
 
@@ -71,5 +74,25 @@ export class ServersController {
     @Param('serverId', { schema: uuidSchema }) serverId: string,
   ) {
     return this.servers.remove(user.id, serverId);
+  }
+
+  @Patch(':serverId/members/:memberId')
+  updateMember(
+    @CurrentUser() user: AuthUser,
+    @Param('serverId', { schema: uuidSchema }) serverId: string,
+    @Param('memberId', { schema: uuidSchema }) memberId: string,
+    @Body({ schema: updateMemberSchema }) body: UpdateMemberInput,
+  ) {
+    return this.servers.updateMember(user.id, serverId, memberId, body);
+  }
+
+  @Delete(':serverId/members/:memberId')
+  @HttpCode(204)
+  kick(
+    @CurrentUser() user: AuthUser,
+    @Param('serverId', { schema: uuidSchema }) serverId: string,
+    @Param('memberId', { schema: uuidSchema }) memberId: string,
+  ) {
+    return this.servers.kick(user.id, serverId, memberId);
   }
 }

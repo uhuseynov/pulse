@@ -22,12 +22,15 @@ export type MemberRole = "OWNER" | "ADMIN" | "MEMBER";
 
 export type ChannelType = "TEXT" | "VOICE";
 
+/** Idle means every open tab of the user has been inactive for a while. */
+export type PresenceStatus = "online" | "idle" | "offline";
+
 export interface Member {
   id: string;
   role: MemberRole;
   joinedAt: string;
   user: UserSummary;
-  online: boolean;
+  status: PresenceStatus;
 }
 
 export interface Channel {
@@ -46,10 +49,12 @@ export interface ServerDetails extends ServerSummary {
   voiceParticipants: Record<string, string[]>;
 }
 
+/** A message lives in a channel or in a conversation, never both. */
 export interface Message {
   id: string;
   content: string;
-  channelId: string;
+  channelId: string | null;
+  conversationId: string | null;
   createdAt: string;
   editedAt: string | null;
   author: UserSummary;
@@ -58,6 +63,37 @@ export interface Message {
 export interface MessagePage {
   items: Message[];
   nextCursor: string | null;
+}
+
+/** Where a list of messages lives. */
+export interface Place {
+  kind: "channel" | "conversation";
+  id: string;
+}
+
+export interface FriendRequest {
+  /** Id of the friendship, used to accept, decline or remove it. */
+  id: string;
+  createdAt: string;
+  user: UserSummary;
+}
+
+export interface Friend extends FriendRequest {
+  status: PresenceStatus;
+}
+
+export interface FriendsOverview {
+  friends: Friend[];
+  incoming: FriendRequest[];
+  outgoing: FriendRequest[];
+}
+
+export interface Conversation {
+  id: string;
+  createdAt: string;
+  lastMessageAt: string;
+  /** The other person. */
+  user: UserSummary;
 }
 
 export interface VoiceCredentials {

@@ -107,7 +107,7 @@ describe('Realtime (e2e)', () => {
       .expect(200);
     await expect(joined).resolves.toMatchObject({
       serverId,
-      member: { user: { id: newcomer.id }, online: true },
+      member: { user: { id: newcomer.id }, status: 'online' },
     });
 
     const received = nextEvent(newcomerSocket, 'message:created');
@@ -172,25 +172,94 @@ describe('Realtime (e2e)', () => {
     await expect(injected).resolves.toBe(true);
   });
 
+  it('does not rate limit socket events as if they were one client', async () => {
+    const [ownerSocket, memberSocket] = await Promise.all([
+      connect(owner),
+      connect(member),
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // More events than the REST limit allows one address per minute.
+    for (let i = 0; i < 350; i += 1) {
+      memberSocket.emit('typing', { channelId });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const typing = nextEvent(ownerSocket, 'typing');
+    memberSocket.emit('typing', { channelId });
+    await expect(typing).resolves.toEqual({ channelId, userId: member.id });
+  });
+
   it('reports presence when a member connects and disconnects', async () => {
     const ownerSocket = await connect(owner);
     await new Promise((resolve) => setTimeout(resolve, 200));
 
     const online = nextEvent(ownerSocket, 'presence:changed');
     const memberSocket = await connect(member);
-    await expect(online).resolves.toEqual({ userId: member.id, online: true });
+    await expect(online).resolves.toEqual({
+      userId: member.id,
+      status: 'online',
+    });
 
     const details = await as(app, owner)
       .get(`/servers/${serverId}`)
       .expect(200);
     const view = details.body.members.find((m: any) => m.user.id === member.id);
-    expect(view.online).toBe(true);
+    expect(view.status).toBe('online');
 
     const offline = nextEvent(ownerSocket, 'presence:changed');
     memberSocket.disconnect();
     await expect(offline).resolves.toEqual({
       userId: member.id,
-      online: false,
+      status: 'offline',
     });
+  });
+
+  it('marks a user idle only when all of their tabs are idle', async () => {
+    const ownerSocket = await connect(owner);
+    const first = await connect(member);
+    const second = await connect(member);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // One idle tab out of two changes nothing.
+    const nothing = expectNoEvent(ownerSocket, 'presence:changed');
+    first.emit('presence:activity', { idle: true });
+    await expect(nothing).resolves.toBe(true);
+
+    const idle = nextEvent(ownerSocket, 'presence:changed');
+    second.emit('presence:activity', { idle: true });
+    await expect(idle).resolves.toEqual({ userId: member.id, status: 'idle' });
+
+    const details = await as(app, owner)
+      .get(`/servers/${serverId}`)
+      .expect(200);
+    const view = details.body.members.find((m: any) => m.user.id === member.id);
+    expect(view.status).toBe('idle');
+
+    const back = nextEvent(ownerSocket, 'presence:changed');
+    first.emit('presence:activity', { idle: false });
+    await expect(back).resolves.toEqual({
+      userId: member.id,
+      status: 'online',
+    });
+
+    // A tab that reconnects while idle says so the moment it connects.
+    first.disconnect();
+    second.disconnect();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const seen: string[] = [];
+    ownerSocket.on('presence:changed', (event) => seen.push(event.status));
+    const eager = await connect(member);
+    eager.emit('presence:activity', { idle: true });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    ownerSocket.off('presence:changed');
+    expect(seen.at(-1)).toBe('idle');
+    eager.emit('presence:activity', { idle: false });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // Garbage is ignored.
+    const ignored = expectNoEvent(ownerSocket, 'presence:changed');
+    eager.emit('presence:activity', { idle: 'yes' });
+    eager.emit('presence:activity');
+    await expect(ignored).resolves.toBe(true);
   });
 });

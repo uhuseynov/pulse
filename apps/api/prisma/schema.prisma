@@ -19,6 +19,11 @@ enum ChannelType {
   VOICE
 }
 
+enum FriendshipStatus {
+  PENDING
+  ACCEPTED
+}
+
 model User {
   id           String   @id @default(uuid(7)) @db.Uuid
   email        String   @unique
@@ -28,9 +33,13 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  ownedServers Server[]
-  memberships  Member[]
-  messages     Message[]
+  ownedServers           Server[]
+  memberships            Member[]
+  messages               Message[]
+  sentFriendRequests     Friendship[]   @relation("FriendshipRequester")
+  receivedFriendRequests Friendship[]   @relation("FriendshipAddressee")
+  conversationsAsA       Conversation[] @relation("ConversationUserA")
+  conversationsAsB       Conversation[] @relation("ConversationUserB")
 
   @@map("users")
 }
@@ -79,17 +88,55 @@ model Channel {
   @@map("channels")
 }
 
+/// A message belongs to exactly one place: a channel or a conversation.
 model Message {
-  id        String    @id @default(uuid(7)) @db.Uuid
-  content   String
-  channelId String    @db.Uuid
-  authorId  String    @db.Uuid
-  createdAt DateTime  @default(now())
-  editedAt  DateTime?
+  id             String    @id @default(uuid(7)) @db.Uuid
+  content        String
+  channelId      String?   @db.Uuid
+  conversationId String?   @db.Uuid
+  authorId       String    @db.Uuid
+  createdAt      DateTime  @default(now())
+  editedAt       DateTime?
 
-  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  author  User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  channel      Channel?      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  author       User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
 
   @@index([channelId, id])
+  @@index([conversationId, id])
   @@map("messages")
+}
+
+/// A friend request, and once accepted, the friendship itself.
+model Friendship {
+  id          String           @id @default(uuid(7)) @db.Uuid
+  status      FriendshipStatus @default(PENDING)
+  requesterId String           @db.Uuid
+  addresseeId String           @db.Uuid
+  createdAt   DateTime         @default(now())
+
+  requester User @relation("FriendshipRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  addressee User @relation("FriendshipAddressee", fields: [addresseeId], references: [id], onDelete: Cascade)
+
+  @@unique([requesterId, addresseeId])
+  @@index([addresseeId])
+  @@map("friendships")
+}
+
+/// A direct-message thread between two users. userAId is always the smaller
+/// of the two ids, so each pair of users has exactly one conversation.
+model Conversation {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  userAId       String   @db.Uuid
+  userBId       String   @db.Uuid
+  createdAt     DateTime @default(now())
+  lastMessageAt DateTime @default(now())
+
+  userA    User      @relation("ConversationUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB    User      @relation("ConversationUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@unique([userAId, userBId])
+  @@index([userBId])
+  @@map("conversations")
 }

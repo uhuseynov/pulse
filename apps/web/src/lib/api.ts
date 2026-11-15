@@ -2,8 +2,12 @@ import type {
   AuthResponse,
   Channel,
   ChannelType,
+  Conversation,
+  FriendsOverview,
+  Member,
   Message,
   MessagePage,
+  Place,
   ServerDetails,
   ServerSummary,
   User,
@@ -47,7 +51,8 @@ async function request<T>(
           : {}),
         ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
       },
-      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      body:
+        options.body !== undefined ? JSON.stringify(options.body) : undefined,
     });
   } catch {
     throw new ApiError(0, "Cannot reach the server. Is the API running?");
@@ -66,13 +71,17 @@ async function request<T>(
   return body as T;
 }
 
+const messagesPath = (place: Place) =>
+  `/${place.kind === "channel" ? "channels" : "conversations"}/${place.id}/messages`;
+
 export const api = {
   register: (input: {
     email: string;
     username: string;
     displayName?: string;
     password: string;
-  }) => request<AuthResponse>("/auth/register", { method: "POST", body: input }),
+  }) =>
+    request<AuthResponse>("/auth/register", { method: "POST", body: input }),
 
   login: (input: { email: string; password: string }) =>
     request<AuthResponse>("/auth/login", { method: "POST", body: input }),
@@ -120,9 +129,9 @@ export const api = {
   deleteChannel: (token: string, channelId: string) =>
     request<void>(`/channels/${channelId}`, { method: "DELETE", token }),
 
-  listMessages: (token: string, channelId: string, before?: string) =>
+  listMessages: (token: string, place: Place, before?: string) =>
     request<MessagePage>(
-      `/channels/${channelId}/messages${before ? `?before=${before}` : ""}`,
+      `${messagesPath(place)}${before ? `?before=${before}` : ""}`,
       { token },
     ),
 
@@ -134,10 +143,68 @@ export const api = {
       token,
     }),
 
-  sendMessage: (token: string, channelId: string, content: string) =>
-    request<Message>(`/channels/${channelId}/messages`, {
+  sendMessage: (token: string, place: Place, content: string) =>
+    request<Message>(messagesPath(place), {
       method: "POST",
       token,
       body: { content },
+    }),
+
+  editMessage: (token: string, messageId: string, content: string) =>
+    request<Message>(`/messages/${messageId}`, {
+      method: "PATCH",
+      token,
+      body: { content },
+    }),
+
+  deleteMessage: (token: string, messageId: string) =>
+    request<void>(`/messages/${messageId}`, { method: "DELETE", token }),
+
+  setMemberRole: (
+    token: string,
+    serverId: string,
+    memberId: string,
+    role: "ADMIN" | "MEMBER",
+  ) =>
+    request<Member>(`/servers/${serverId}/members/${memberId}`, {
+      method: "PATCH",
+      token,
+      body: { role },
+    }),
+
+  kickMember: (token: string, serverId: string, memberId: string) =>
+    request<void>(`/servers/${serverId}/members/${memberId}`, {
+      method: "DELETE",
+      token,
+    }),
+
+  listFriends: (token: string) =>
+    request<FriendsOverview>("/friends", { token }),
+
+  sendFriendRequest: (token: string, username: string) =>
+    request<{ accepted: boolean }>("/friends/requests", {
+      method: "POST",
+      token,
+      body: { username },
+    }),
+
+  acceptFriendRequest: (token: string, friendshipId: string) =>
+    request<void>(`/friends/requests/${friendshipId}/accept`, {
+      method: "POST",
+      token,
+    }),
+
+  /** Also declines an incoming request and cancels an outgoing one. */
+  removeFriend: (token: string, friendshipId: string) =>
+    request<void>(`/friends/${friendshipId}`, { method: "DELETE", token }),
+
+  listConversations: (token: string) =>
+    request<Conversation[]>("/conversations", { token }),
+
+  openConversation: (token: string, userId: string) =>
+    request<Conversation>("/conversations", {
+      method: "POST",
+      token,
+      body: { userId },
     }),
 };
