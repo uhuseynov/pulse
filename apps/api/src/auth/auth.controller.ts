@@ -9,10 +9,14 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import { authRateLimit } from '../config/env';
 import {
+  forgotPasswordSchema,
   loginSchema,
   registerSchema,
+  resetPasswordSchema,
+  type ForgotPasswordInput,
   type LoginInput,
   type RegisterInput,
+  type ResetPasswordInput,
 } from './auth.schemas';
 import { AuthService } from './auth.service';
 import type { AuthUser } from './auth.types';
@@ -37,6 +41,28 @@ export class AuthController {
   @HttpCode(200)
   login(@Body({ schema: loginSchema }) body: LoginInput) {
     return this.auth.login(body);
+  }
+
+  /**
+   * Always answers 204, whether or not the address belongs to an account,
+   * so the endpoint cannot be used to find out who is registered.
+   */
+  @Post('forgot-password')
+  @Throttle(authThrottle)
+  @HttpCode(204)
+  forgotPassword(
+    @Body({ schema: forgotPasswordSchema }) body: ForgotPasswordInput,
+  ) {
+    return this.auth.requestPasswordReset(body.email);
+  }
+
+  @Post('reset-password')
+  @Throttle(authThrottle)
+  @HttpCode(204)
+  resetPassword(
+    @Body({ schema: resetPasswordSchema }) body: ResetPasswordInput,
+  ) {
+    return this.auth.resetPassword(body);
   }
 
   @Get('me')

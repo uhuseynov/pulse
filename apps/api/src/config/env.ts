@@ -16,6 +16,14 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((value) => value?.trim() || undefined),
+  // Email is optional: without a key nothing is sent, and in development the
+  // message is written to the log instead.
+  RESEND_API_KEY: z
+    .string()
+    .optional()
+    .transform((value) => value?.trim() || undefined),
+  /** Needs a domain verified at Resend, unless it is their test address. */
+  EMAIL_FROM: z.string().trim().min(3).default('Pulse <onboarding@resend.dev>'),
   // Voice rooms are optional: without these three the rest of the app still
   // runs and the voice endpoints report that the feature is turned off.
   LIVEKIT_URL: z.string().optional(),

@@ -25,21 +25,24 @@ enum FriendshipStatus {
 }
 
 model User {
-  id           String   @id @default(uuid(7)) @db.Uuid
-  email        String   @unique
-  username     String   @unique
-  displayName  String
-  passwordHash String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                String    @id @default(uuid(7)) @db.Uuid
+  email             String    @unique
+  username          String    @unique
+  displayName       String
+  passwordHash      String
+  /// Sessions that were issued before this moment are no longer accepted.
+  passwordChangedAt DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   ownedServers           Server[]
   memberships            Member[]
   messages               Message[]
-  sentFriendRequests     Friendship[]   @relation("FriendshipRequester")
-  receivedFriendRequests Friendship[]   @relation("FriendshipAddressee")
-  conversationsAsA       Conversation[] @relation("ConversationUserA")
-  conversationsAsB       Conversation[] @relation("ConversationUserB")
+  sentFriendRequests     Friendship[]         @relation("FriendshipRequester")
+  receivedFriendRequests Friendship[]         @relation("FriendshipAddressee")
+  conversationsAsA       Conversation[]       @relation("ConversationUserA")
+  conversationsAsB       Conversation[]       @relation("ConversationUserB")
+  passwordResetTokens    PasswordResetToken[]
 
   @@map("users")
 }
@@ -139,4 +142,19 @@ model Conversation {
   @@unique([userAId, userBId])
   @@index([userBId])
   @@map("conversations")
+}
+
+/// A single-use link for choosing a new password. Only a hash of the token
+/// is stored, so reading the database is not enough to use one.
+model PasswordResetToken {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  tokenHash String   @unique
+  userId    String   @db.Uuid
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
 }
