@@ -1,12 +1,16 @@
 "use client";
 
 import type { ServerSummary } from "@/lib/types";
+import { PulseMark } from "../logo";
 import { initials } from "./avatar";
 
 export function ServerRail({
   servers,
   activeServerId,
   unreadServers,
+  homeActive,
+  homeUnread,
+  onHome,
   onSelect,
   onCreate,
   onJoin,
@@ -14,6 +18,10 @@ export function ServerRail({
   servers: ServerSummary[];
   activeServerId: string | null;
   unreadServers: Record<string, true>;
+  homeActive: boolean;
+  /** An unread direct message or a friend request is waiting. */
+  homeUnread: boolean;
+  onHome: () => void;
   onSelect: (serverId: string) => void;
   onCreate: () => void;
   onJoin: () => void;
@@ -23,6 +31,28 @@ export function ServerRail({
       aria-label="Servers"
       className="flex w-[72px] shrink-0 flex-col items-center gap-2 overflow-y-auto bg-[#07080b] py-3"
     >
+      <button
+        type="button"
+        title="Home"
+        aria-label="Home"
+        aria-current={homeActive ? "true" : undefined}
+        onClick={onHome}
+        className={`relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden transition-all ${
+          homeActive
+            ? "rounded-2xl"
+            : "rounded-3xl opacity-80 hover:rounded-2xl hover:opacity-100"
+        }`}
+      >
+        <PulseMark className="h-12 w-12" />
+        {homeUnread && !homeActive && (
+          <span
+            aria-label="New messages or friend requests"
+            className="absolute right-0 top-0 h-3.5 w-3.5 rounded-full border-2 border-[#07080b] bg-rose-500"
+          />
+        )}
+      </button>
+      <span className="my-1 h-px w-8 bg-white/10" />
+
       {servers.map((server) => {
         const active = server.id === activeServerId;
         return (

@@ -1,3 +1,5 @@
+import type { PresenceStatus } from "@/lib/types";
+
 const COLORS = [
   "bg-indigo-600",
   "bg-emerald-600",
@@ -22,16 +24,28 @@ export function initials(name: string): string {
   return letters.toUpperCase();
 }
 
+const STATUS_COLORS: Record<PresenceStatus, string> = {
+  online: "bg-emerald-500",
+  idle: "bg-amber-400",
+  offline: "bg-gray-500",
+};
+
+const STATUS_LABELS: Record<PresenceStatus, string> = {
+  online: "Online",
+  idle: "Idle",
+  offline: "Offline",
+};
+
 export function Avatar({
   id,
   name,
-  online,
+  status,
   size = "md",
 }: {
   id: string;
   name: string;
   /** Shows a status dot when defined. */
-  online?: boolean;
+  status?: PresenceStatus;
   size?: "sm" | "md";
 }) {
   const box = size === "sm" ? "h-8 w-8 text-xs" : "h-10 w-10 text-sm";
@@ -43,11 +57,12 @@ export function Avatar({
       >
         {initials(name)}
       </span>
-      {online !== undefined && (
+      {status !== undefined && (
         <span
-          className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-[#11141b] ${
-            online ? "bg-emerald-500" : "bg-gray-500"
-          }`}
+          role="img"
+          aria-label={STATUS_LABELS[status]}
+          title={STATUS_LABELS[status]}
+          className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-[#11141b] ${STATUS_COLORS[status]}`}
         />
       )}
     </span>

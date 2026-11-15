@@ -1,8 +1,11 @@
 import type {
   Channel,
+  Conversation,
+  FriendsOverview,
   Member,
   Message,
   MessagePage,
+  PresenceStatus,
   ServerDetails,
   ServerSummary,
 } from "./types";
@@ -20,10 +23,18 @@ export interface ChatState {
   /** Details of the active server, null while they are loading. */
   server: ServerDetails | null;
   activeChannelId: string | null;
+  /** True while the friends and direct-messages view is open. */
+  home: boolean;
+  friends: FriendsOverview | null;
+  conversations: Conversation[] | null;
+  /** The open conversation; null shows the friends list. */
+  activeConversationId: string | null;
+  /** Keyed by channel id or conversation id. */
   messages: Record<string, ChannelMessages>;
   unreadChannels: Record<string, true>;
   unreadServers: Record<string, true>;
-  /** channelId -> userId -> time (ms) at which the indicator expires. */
+  unreadConversations: Record<string, true>;
+  /** channel or conversation id -> userId -> time (ms) the indicator expires. */
   typing: Record<string, Record<string, number>>;
   /** channelId -> ids of the users sitting in that voice channel. */
   voiceParticipants: Record<string, string[]>;
@@ -38,9 +49,14 @@ export const initialChatState: ChatState = {
   activeServerId: null,
   server: null,
   activeChannelId: null,
+  home: false,
+  friends: null,
+  conversations: null,
+  activeConversationId: null,
   messages: {},
   unreadChannels: {},
   unreadServers: {},
+  unreadConversations: {},
   typing: {},
   voiceParticipants: {},
   voiceEnabled: false,
@@ -61,15 +77,24 @@ export type ChatAction =
   | { type: "olderLoaded"; channelId: string; page: MessagePage | null }
   | {
       type: "messageReceived";
-      serverId: string;
+      /** Null for a direct message. */
+      serverId: string | null;
       message: Message;
       currentUserId: string;
     }
+  | { type: "messageUpdated"; message: Message }
+  | { type: "messageDeleted"; placeId: string; messageId: string }
+  | { type: "homeOpened" }
+  | { type: "friendsLoaded"; friends: FriendsOverview }
+  | { type: "conversationsLoaded"; conversations: Conversation[] }
+  | { type: "conversationOpened"; conversation: Conversation }
+  | { type: "conversationSelected"; conversationId: string | null }
   | { type: "channelCreated"; channel: Channel }
   | { type: "channelDeleted"; serverId: string; channelId: string }
   | { type: "memberJoined"; serverId: string; member: Member }
+  | { type: "memberUpdated"; serverId: string; member: Member }
   | { type: "memberLeft"; serverId: string; userId: string }
-  | { type: "presenceChanged"; userId: string; online: boolean }
+  | { type: "presenceChanged"; userId: string; status: PresenceStatus }
   | { type: "typingStarted"; channelId: string; userId: string; until: number }
   | { type: "typingExpired"; now: number }
   | { type: "voiceEnabled" }
@@ -88,6 +113,11 @@ function mergeMessages(...lists: Message[][]): Message[] {
     for (const message of list) byId.set(message.id, message);
   }
   return [...byId.values()].sort((a, b) => (a.id < b.id ? -1 : 1));
+}
+
+/** The channel or conversation a message belongs to. */
+export function placeIdOf(message: Message): string {
+  return message.channelId ?? message.conversationId ?? "";
 }
 
 function omit<T>(record: Record<string, T>, key: string): Record<string, T> {
@@ -127,9 +157,58 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "serverSelected":
       return {
         ...state,
+        home: false,
         activeServerId: action.serverId,
         server: null,
         activeChannelId: null,
+      };
+
+    case "homeOpened":
+      return {
+        ...state,
+        home: true,
+        activeServerId: null,
+        server: null,
+        activeChannelId: null,
+        unreadConversations: state.activeConversationId
+          ? omit(state.unreadConversations, state.activeConversationId)
+          : state.unreadConversations,
+      };
+
+    case "friendsLoaded":
+      return { ...state, friends: action.friends };
+
+    case "conversationsLoaded": {
+      const stillThere = action.conversations.some(
+        (c) => c.id === state.activeConversationId,
+      );
+      return {
+        ...state,
+        conversations: action.conversations,
+        activeConversationId: stillThere ? state.activeConversationId : null,
+      };
+    }
+
+    case "conversationOpened": {
+      const { conversation } = action;
+      const known = state.conversations?.some((c) => c.id === conversation.id);
+      return {
+        ...state,
+        conversations: known
+          ? state.conversations
+          : [conversation, ...(state.conversations ?? [])],
+        activeConversationId: conversation.id,
+        unreadConversations: omit(state.unreadConversations, conversation.id),
+      };
+    }
+
+    case "conversationSelected":
+      return {
+        ...state,
+        activeConversationId: action.conversationId,
+        unreadConversations: action.conversationId
+          ? omit(state.unreadConversations, action.conversationId)
+          : state.unreadConversations,
       };
 
     case "serverLoaded": {
@@ -251,12 +330,13 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
     case "messageReceived": {
       const { message, serverId, currentUserId } = action;
-      const entry = state.messages[message.channelId];
+      const placeId = placeIdOf(message);
+      const entry = state.messages[placeId];
       const messages =
         entry && entry.status !== "error"
           ? {
               ...state.messages,
-              [message.channelId]: {
+              [placeId]: {
                 ...entry,
                 items: mergeMessages(entry.items, [message]),
               },
@@ -264,25 +344,82 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           : state.messages;
 
       const fromSomeoneElse = message.author.id !== currentUserId;
-      const channelTyping = state.typing[message.channelId];
-      return {
+      const placeTyping = state.typing[placeId];
+      const next: ChatState = {
         ...state,
         messages,
         // The author has obviously stopped typing.
-        typing: channelTyping
-          ? {
-              ...state.typing,
-              [message.channelId]: omit(channelTyping, message.author.id),
-            }
+        typing: placeTyping
+          ? { ...state.typing, [placeId]: omit(placeTyping, message.author.id) }
           : state.typing,
+      };
+
+      if (message.conversationId) {
+        const onScreen =
+          state.home && state.activeConversationId === message.conversationId;
+        const moved = state.conversations?.find(
+          (c) => c.id === message.conversationId,
+        );
+        return {
+          ...next,
+          // The conversation with the newest message goes first.
+          conversations:
+            moved && state.conversations
+              ? [
+                  { ...moved, lastMessageAt: message.createdAt },
+                  ...state.conversations.filter((c) => c.id !== moved.id),
+                ]
+              : state.conversations,
+          unreadConversations:
+            fromSomeoneElse && !onScreen
+              ? { ...state.unreadConversations, [message.conversationId]: true }
+              : state.unreadConversations,
+        };
+      }
+
+      return {
+        ...next,
         unreadChannels:
-          fromSomeoneElse && message.channelId !== state.activeChannelId
-            ? { ...state.unreadChannels, [message.channelId]: true }
+          fromSomeoneElse && placeId !== state.activeChannelId
+            ? { ...state.unreadChannels, [placeId]: true }
             : state.unreadChannels,
         unreadServers:
-          fromSomeoneElse && serverId !== state.activeServerId
+          fromSomeoneElse && serverId && serverId !== state.activeServerId
             ? { ...state.unreadServers, [serverId]: true }
             : state.unreadServers,
+      };
+    }
+
+    case "messageUpdated": {
+      const placeId = placeIdOf(action.message);
+      const entry = state.messages[placeId];
+      if (!entry?.items.some((m) => m.id === action.message.id)) return state;
+      return {
+        ...state,
+        messages: {
+          ...state.messages,
+          [placeId]: {
+            ...entry,
+            items: entry.items.map((m) =>
+              m.id === action.message.id ? action.message : m,
+            ),
+          },
+        },
+      };
+    }
+
+    case "messageDeleted": {
+      const entry = state.messages[action.placeId];
+      if (!entry?.items.some((m) => m.id === action.messageId)) return state;
+      return {
+        ...state,
+        messages: {
+          ...state.messages,
+          [action.placeId]: {
+            ...entry,
+            items: entry.items.filter((m) => m.id !== action.messageId),
+          },
+        },
       };
     }
 
@@ -340,6 +477,19 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       };
     }
 
+    case "memberUpdated": {
+      if (state.server?.id !== action.serverId) return state;
+      return {
+        ...state,
+        server: {
+          ...state.server,
+          members: state.server.members.map((m) =>
+            m.id === action.member.id ? action.member : m,
+          ),
+        },
+      };
+    }
+
     case "memberLeft": {
       if (state.server?.id !== action.serverId) return state;
       return {
@@ -354,17 +504,30 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     }
 
     case "presenceChanged": {
-      if (!state.server?.members.some((m) => m.user.id === action.userId)) {
-        return state;
-      }
+      const { userId, status } = action;
+      const inServer = state.server?.members.some((m) => m.user.id === userId);
+      const isFriend = state.friends?.friends.some((f) => f.user.id === userId);
+      if (!inServer && !isFriend) return state;
       return {
         ...state,
-        server: {
-          ...state.server,
-          members: state.server.members.map((m) =>
-            m.user.id === action.userId ? { ...m, online: action.online } : m,
-          ),
-        },
+        server:
+          inServer && state.server
+            ? {
+                ...state.server,
+                members: state.server.members.map((m) =>
+                  m.user.id === userId ? { ...m, status } : m,
+                ),
+              }
+            : state.server,
+        friends:
+          isFriend && state.friends
+            ? {
+                ...state.friends,
+                friends: state.friends.friends.map((f) =>
+                  f.user.id === userId ? { ...f, status } : f,
+                ),
+              }
+            : state.friends,
       };
     }
 
