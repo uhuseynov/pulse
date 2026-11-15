@@ -1,51 +1,49 @@
+import type { RedisService } from '../redis/redis.service';
 import { VoicePresenceService } from './voice-presence.service';
 
-describe('VoicePresenceService', () => {
+describe('VoicePresenceService (in memory)', () => {
   let voice: VoicePresenceService;
 
   beforeEach(() => {
-    voice = new VoicePresenceService();
+    voice = new VoicePresenceService({ client: null } as RedisService);
   });
 
-  it('lists who is in a channel', () => {
-    voice.join('channel-a', 'socket-1', 'user-1');
-    voice.join('channel-a', 'socket-2', 'user-2');
-    expect(voice.participants('channel-a').sort()).toEqual([
+  it('lists who is in a channel', async () => {
+    await voice.join('channel-a', 'socket-1', 'user-1');
+    await voice.join('channel-a', 'socket-2', 'user-2');
+    expect((await voice.participants('channel-a')).sort()).toEqual([
       'user-1',
       'user-2',
     ]);
-    expect(voice.participants('channel-b')).toEqual([]);
+    await expect(voice.participants('channel-b')).resolves.toEqual([]);
   });
 
-  it('counts a user with two tabs once', () => {
-    voice.join('channel-a', 'socket-1', 'user-1');
-    voice.join('channel-a', 'socket-2', 'user-1');
-    expect(voice.participants('channel-a')).toEqual(['user-1']);
+  it('counts a user with two tabs once', async () => {
+    await voice.join('channel-a', 'socket-1', 'user-1');
+    await voice.join('channel-a', 'socket-2', 'user-1');
+    await expect(voice.participants('channel-a')).resolves.toEqual(['user-1']);
 
-    voice.leave('socket-1');
-    expect(voice.participants('channel-a')).toEqual(['user-1']);
-    voice.leave('socket-2');
-    expect(voice.participants('channel-a')).toEqual([]);
+    await voice.leave('channel-a', 'socket-1');
+    await expect(voice.participants('channel-a')).resolves.toEqual(['user-1']);
+    await voice.leave('channel-a', 'socket-2');
+    await expect(voice.participants('channel-a')).resolves.toEqual([]);
   });
 
-  it('moves a socket out of its previous channel on join', () => {
-    voice.join('channel-a', 'socket-1', 'user-1');
-    expect(voice.join('channel-b', 'socket-1', 'user-1')).toBe('channel-a');
-    expect(voice.participants('channel-a')).toEqual([]);
-    expect(voice.participants('channel-b')).toEqual(['user-1']);
+  it('ignores a socket leaving a channel it is not in', async () => {
+    await voice.join('channel-a', 'socket-1', 'user-1');
+    await voice.leave('channel-b', 'socket-1');
+    await voice.leave('channel-a', 'socket-9');
+    await expect(voice.participants('channel-a')).resolves.toEqual(['user-1']);
   });
 
-  it('reports the channel a leaving socket was in, once', () => {
-    voice.join('channel-a', 'socket-1', 'user-1');
-    expect(voice.leave('socket-1')).toBe('channel-a');
-    expect(voice.leave('socket-1')).toBeNull();
-    expect(voice.leave('never-joined')).toBeNull();
-  });
-
-  it('summarises only the channels that have someone in them', () => {
-    voice.join('channel-a', 'socket-1', 'user-1');
-    expect(voice.snapshot(['channel-a', 'channel-b'])).toEqual({
+  it('takes a snapshot of several channels, skipping empty ones', async () => {
+    await voice.join('channel-a', 'socket-1', 'user-1');
+    await voice.join('channel-b', 'socket-2', 'user-2');
+    await expect(
+      voice.snapshot(['channel-a', 'channel-b', 'channel-c']),
+    ).resolves.toEqual({
       'channel-a': ['user-1'],
+      'channel-b': ['user-2'],
     });
   });
 });

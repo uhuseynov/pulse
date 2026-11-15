@@ -20,8 +20,12 @@ export function testDatabaseUrl(): string {
   return url.toString();
 }
 
+export function testRedisUrl(): string {
+  return process.env.TEST_REDIS_URL ?? 'redis://localhost:6379';
+}
+
 /** Point the app at the test database. Call before the AppModule is created. */
-export function useTestEnvironment() {
+export function useTestEnvironment(options: { redis?: boolean } = {}) {
   process.env.NODE_ENV = 'test';
   process.env.DATABASE_URL = testDatabaseUrl();
   process.env.JWT_SECRET = 'test-secret-test-secret-test-secret-1234';
@@ -29,6 +33,9 @@ export function useTestEnvironment() {
   process.env.WEB_ORIGIN = 'http://localhost:3000';
   // The suites register many users from one address.
   process.env.AUTH_RATE_LIMIT = '10000';
+  // Most suites run on in-memory state; the multi-instance one opts in. An
+  // empty value (rather than deleting it) also overrides a developer's .env.
+  process.env.REDIS_URL = options.redis ? testRedisUrl() : '';
   // Tokens are signed locally, so the tests never reach LiveKit itself.
   process.env.LIVEKIT_URL = 'wss://test.livekit.cloud';
   process.env.LIVEKIT_API_KEY = 'APITestKey';

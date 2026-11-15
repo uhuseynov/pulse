@@ -36,4 +36,21 @@ describe('validateEnv', () => {
       /DATABASE_URL[\s\S]*JWT_SECRET/,
     );
   });
+
+  it('treats an empty REDIS_URL as not set', () => {
+    expect(validateEnv({ ...valid }).REDIS_URL).toBeUndefined();
+    expect(
+      validateEnv({ ...valid, REDIS_URL: '  ' }).REDIS_URL,
+    ).toBeUndefined();
+    expect(
+      validateEnv({ ...valid, REDIS_URL: 'rediss://default:pw@host:6379' })
+        .REDIS_URL,
+    ).toBe('rediss://default:pw@host:6379');
+  });
+
+  it('rejects a REDIS_URL that is not a Redis address', () => {
+    expect(() =>
+      validateEnv({ ...valid, REDIS_URL: 'http://localhost:6379' }),
+    ).toThrow(/REDIS_URL/);
+  });
 });

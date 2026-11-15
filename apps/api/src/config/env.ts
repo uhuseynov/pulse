@@ -10,6 +10,12 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default('7d'),
   /** Sign-in and sign-up attempts allowed per minute for one IP address. */
   AUTH_RATE_LIMIT: z.coerce.number().int().positive().default(10),
+  // Redis is optional: without it presence lives in memory, which is correct
+  // for a single API instance. Set it to run more than one.
+  REDIS_URL: z
+    .string()
+    .optional()
+    .transform((value) => value?.trim() || undefined),
   // Voice rooms are optional: without these three the rest of the app still
   // runs and the voice endpoints report that the feature is turned off.
   LIVEKIT_URL: z.string().optional(),
@@ -40,6 +46,13 @@ const schema = envSchema.superRefine((env, ctx) => {
       path: ['LIVEKIT_URL'],
       message:
         'LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be set together',
+    });
+  }
+  if (env.REDIS_URL && !/^rediss?:\/\//.test(env.REDIS_URL)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['REDIS_URL'],
+      message: 'REDIS_URL must start with redis:// or rediss://',
     });
   }
   if (env.LIVEKIT_URL && !/^wss?:\/\//.test(env.LIVEKIT_URL)) {

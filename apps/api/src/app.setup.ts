@@ -4,6 +4,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import type { Env } from './config/env';
 import { SocketIoAdapter } from './realtime/socket-io.adapter';
+import { RedisService } from './redis/redis.service';
 
 /** Configuration shared by the real server and the e2e tests. */
 export function configureApp(app: NestExpressApplication) {
@@ -16,6 +17,8 @@ export function configureApp(app: NestExpressApplication) {
   app.use(helmet());
   app.enableCors({ origin: origins, credentials: true });
   app.useGlobalPipes(new StandardSchemaValidationPipe());
-  app.useWebSocketAdapter(new SocketIoAdapter(app, origins));
+  app.useWebSocketAdapter(
+    new SocketIoAdapter(app, origins, app.get(RedisService).client),
+  );
   app.enableShutdownHooks();
 }

@@ -1,17 +1,21 @@
 import { randomBytes } from 'node:crypto';
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { AccessService } from '../access/access.service';
 import { MemberRole, Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { PresenceService } from '../realtime/presence.service';
+import {
+  PresenceService,
+  type PresenceStatus,
+} from '../realtime/presence.service';
 import { VoicePresenceService } from '../voice/voice-presence.service';
 import { ServerEvent } from '../realtime/realtime.events';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
-import type { CreateServerInput } from './servers.schemas';
+import type { CreateServerInput, UpdateMemberInput } from './servers.schemas';
 
 const memberInclude = {
   user: { select: { id: true, username: true, displayName: true } },
@@ -62,13 +66,17 @@ export class ServersService {
         members: { orderBy: { joinedAt: 'asc' }, include: memberInclude },
       },
     });
+    const [statuses, voiceParticipants] = await Promise.all([
+      this.presence.statuses(server.members.map((member) => member.userId)),
+      // Who is sitting in each voice channel right now.
+      this.voicePresence.snapshot(server.channels.map((channel) => channel.id)),
+    ]);
     return {
       ...server,
-      members: server.members.map((member) => this.toMemberView(member)),
-      // Who is sitting in each voice channel right now.
-      voiceParticipants: this.voicePresence.snapshot(
-        server.channels.map((channel) => channel.id),
+      members: server.members.map((member) =>
+        toMemberView(member, statuses.get(member.userId)),
       ),
+      voiceParticipants,
     };
   }
 
@@ -91,7 +99,7 @@ export class ServersService {
       });
       this.realtime.emitToServer(server.id, ServerEvent.MemberJoined, {
         serverId: server.id,
-        member: this.toMemberView(member),
+        member: toMemberView(member, await this.presence.status(userId)),
       });
       this.realtime.joinServer(userId, server.id);
     }
@@ -122,13 +130,83 @@ export class ServersService {
     this.realtime.closeServer(serverId);
   }
 
-  private toMemberView(member: MemberWithUser) {
-    return {
-      id: member.id,
-      role: member.role,
-      joinedAt: member.joinedAt,
-      user: member.user,
-      online: this.presence.isOnline(member.userId),
-    };
+  /** Only the owner can promote a member to admin, or demote one. */
+  async updateMember(
+    userId: string,
+    serverId: string,
+    memberId: string,
+    input: UpdateMemberInput,
+  ) {
+    await this.access.requireRole(userId, serverId, [MemberRole.OWNER]);
+    const target = await this.requireTarget(serverId, memberId);
+    if (target.role === MemberRole.OWNER) {
+      throw new BadRequestException("The owner's role cannot be changed");
+    }
+    const member = await this.prisma.member.update({
+      where: { id: memberId },
+      data: { role: input.role },
+      include: memberInclude,
+    });
+    const view = toMemberView(
+      member,
+      await this.presence.status(member.userId),
+    );
+    this.realtime.emitToServer(serverId, ServerEvent.MemberUpdated, {
+      serverId,
+      member: view,
+    });
+    return view;
   }
+
+  /**
+   * Removes someone from the server. The owner can remove anyone; admins can
+   * remove ordinary members only.
+   */
+  async kick(userId: string, serverId: string, memberId: string) {
+    const actor = await this.access.requireRole(userId, serverId, [
+      MemberRole.OWNER,
+      MemberRole.ADMIN,
+    ]);
+    const target = await this.requireTarget(serverId, memberId);
+    if (target.userId === userId) {
+      throw new BadRequestException('You cannot remove yourself');
+    }
+    if (
+      target.role === MemberRole.OWNER ||
+      (target.role === MemberRole.ADMIN && actor.role !== MemberRole.OWNER)
+    ) {
+      throw new ForbiddenException('You do not have permission to do this');
+    }
+
+    await this.prisma.member.delete({ where: { id: memberId } });
+    this.realtime.leaveServer(target.userId, serverId);
+    this.realtime.emitToUsers([target.userId], ServerEvent.ServerKicked, {
+      serverId,
+    });
+    this.realtime.emitToServer(serverId, ServerEvent.MemberLeft, {
+      serverId,
+      userId: target.userId,
+    });
+    await this.realtime.dropVoice(target.userId, serverId);
+  }
+
+  private async requireTarget(serverId: string, memberId: string) {
+    const target = await this.prisma.member.findFirst({
+      where: { id: memberId, serverId },
+    });
+    if (!target) {
+      throw new NotFoundException('Member not found');
+    }
+    return target;
+  }
+}
+
+function toMemberView(member: MemberWithUser, status?: PresenceStatus) {
+  return {
+    id: member.id,
+    role: member.role,
+    joinedAt: member.joinedAt,
+    user: member.user,
+    status: status ?? 'offline',
+  };
 }
